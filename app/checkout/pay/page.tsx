@@ -38,20 +38,19 @@ function PayContent() {
     const [isGeneratingQris, setIsGeneratingQris] = useState<boolean>(true);
     const [qrisError, setQrisError] = useState<boolean>(false);
 
-    // State upload media bukti
+    // State upload media bukti & Fitur Copy
     const [file, setFile] = useState<File | null>(null);
     const [uploading, setUploading] = useState<boolean>(false);
     const [uploadSuccess, setUploadSuccess] = useState<boolean>(false);
+    const [isCopied, setIsCopied] = useState<boolean>(false);
 
     // FUNGSI API: Men-generate QRIS Dinamis via Proxy Backend Next.js (Anti-CORS)
     const fetchDynamicQris = async (amount: number) => {
         setIsGeneratingQris(true);
         setQrisError(false);
         try {
-            // String QRIS Statis Orisinal
             const staticQris = "00020101021126570011ID.DANA.WWW011893600915300024307302090002430730303UMI51440014ID.CO.QRIS.WWW0215ID10254666263850303UMI5204549953033605802ID5914Puding Hambali600412026105612566304027C";
             
-            // PERUBAHAN: Menembak ke /api/qris milik backend kita sendiri
             const response = await fetch("/api/qris", {
                 method: "POST",
                 headers: {
@@ -66,7 +65,6 @@ function PayContent() {
             const data = await response.json();
             
             if (data.status === "success" && data.qris_base64) {
-                // Tambahkan prefix 'data:image/png;base64,' jika dari API belum ada
                 const base64Str = data.qris_base64.startsWith('data:image') 
                     ? data.qris_base64 
                     : `data:image/png;base64,${data.qris_base64}`;
@@ -101,14 +99,12 @@ function PayContent() {
                     const orderData = docSnap.data();
                     const paymentAmount = Number(orderData.totalPayment) || 0;
                     
-                    // Ambil seluruh data esensial untuk dicetak di PDF Invoice
                     setTotalPay(paymentAmount);
                     setBuyerName(orderData.customerName || orderData.buyerName || 'Pelanggan Setia');
                     setBuyerContact(orderData.contactInfo || orderData.buyerContact || '-');
                     setBuyerDomicile(orderData.domicile || orderData.buyerDomicile || '-');
                     setOrderItems(orderData.items || []);
 
-                    // Panggil API Proxy QRIS Dinamis setelah nominal berhasil ditarik dari database
                     fetchDynamicQris(paymentAmount);
                 } else {
                     setErrorMsg("Data transaksi tidak ditemukan di sistem database.");
@@ -126,6 +122,20 @@ function PayContent() {
         }
     }, [orderId]);
 
+    // FUNGSI COPY NOMOR ADMIN KE CLIPBOARD
+    const handleCopyNumber = () => {
+        const adminNumber = "085174237980";
+        navigator.clipboard.writeText(adminNumber).then(() => {
+            setIsCopied(true);
+            setTimeout(() => setIsCopied(false), 2000); // Reset tulisan setelah 2 detik
+        }).catch(err => {
+            console.error("Gagal menyalin nomor:", err);
+            alert("Gagal menyalin nomor. Silakan coba salin secara manual: " + adminNumber);
+        });
+        setIsCopied(true);
+        setTimeout(() => setIsCopied(false), 2000); // Reset tulisan setelah 2 detik
+    };
+
     // FUNGSI UTAMA GENERATE PDF INVOICE RESMI
     const handleDownloadInvoicePDF = () => {
         try {
@@ -135,7 +145,6 @@ function PayContent() {
                 format: 'a4'
             });
 
-            // 1. Header Toko (Brand Identity)
             docPdf.setFont("Helvetica", "bold");
             docPdf.setFontSize(22);
             docPdf.text("BACANAU STORE", 14, 20);
@@ -145,7 +154,6 @@ function PayContent() {
             docPdf.setTextColor(100, 116, 139);
             docPdf.text("Platform Apparel & Digital Art Kampus", 14, 25);
 
-            // 2. Judul Dokumen Invoice
             docPdf.setFont("Helvetica", "bold");
             docPdf.setFontSize(16);
             docPdf.setTextColor(15, 23, 42);
@@ -156,12 +164,10 @@ function PayContent() {
             docPdf.setTextColor(71, 85, 105);
             docPdf.text(`ID: ${orderId}`, 196, 25, { align: 'right' });
 
-            // Garis pembatas atas dekoratif
             docPdf.setDrawColor(226, 232, 240);
             docPdf.setLineWidth(0.5);
             docPdf.line(14, 32, 196, 32);
 
-            // 3. Metadata Transaksi & Profil Pembeli
             docPdf.setFont("Helvetica", "bold");
             docPdf.setFontSize(10);
             docPdf.setTextColor(100, 116, 139);
@@ -172,18 +178,15 @@ function PayContent() {
             docPdf.setFontSize(10);
             docPdf.setTextColor(15, 23, 42);
             
-            // Kolom Kiri - Data Pembeli
             docPdf.text(`Nama: ${buyerName}`, 14, 46);
             docPdf.text(`Kontak WA: ${buyerContact}`, 14, 52);
             docPdf.text(`Domisili: ${buyerDomicile}`, 14, 58);
 
-            // Kolom Kanan - Meta Transaksi
             const tanggalSekarang = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
             docPdf.text(`Tanggal Cetak: ${tanggalSekarang}`, 115, 46);
             docPdf.text(`Metode: QRIS Dinamis API`, 115, 52);
             docPdf.text(`Status Keamanan: LUNAS (TERVERIFIKASI)`, 115, 58);
 
-            // 4. Pengisian Tabel Rincian Belanja Berbasis autoTable
             const tableRows = orderItems.map((item, index) => [
                 index + 1,
                 item.name,
@@ -214,7 +217,6 @@ function PayContent() {
                 }
             });
 
-            // 5. Total Akhir Pembayaran Rapi Rata Kanan Menggunakan Koordinat Dinamis yang Aman
             const totalSectionY = finalTableY + 12;
             
             docPdf.setFont("Helvetica", "bold");
@@ -227,13 +229,11 @@ function PayContent() {
             docPdf.setTextColor(16, 185, 129); 
             docPdf.text(`Rp ${totalPay.toLocaleString('id-ID')}`, 196, totalSectionY, { align: 'right' });
 
-            // 6. Catatan Kaki Legalitas Digital
             docPdf.setFont("Helvetica", "italic");
             docPdf.setFontSize(8);
             docPdf.setTextColor(148, 163, 184);
             docPdf.text("Invoice ini dikeluarkan secara elektronik dan sah sebagai bukti pembelian komoditas Bacanau Store.", 105, 282, { align: 'center' });
 
-            // Simpan file hasil olahan langsung terunduh otomatis
             docPdf.save(`Bacanau_Store_Invoice_${orderId}.pdf`);
 
         } catch (err) {
@@ -274,7 +274,6 @@ function PayContent() {
             });
 
             setUploadSuccess(true);
-            alert("Sukses! File berhasil diunggah ke cloud.");
         } catch (error: any) {
             console.error("Gagal:", error);
             alert(`Gagal: ${error.message}`);
@@ -321,7 +320,6 @@ function PayContent() {
                         </p>
                     </div>
 
-                    {/* BLOK TAMPILAN GRAFIK QRIS API */}
                     <div className="bg-slate-50 border-2 border-dashed border-slate-200 p-6 flex flex-col items-center justify-center rounded-xl mb-6">
                         <p className="text-sm font-bold text-slate-700 mb-4">Scan QRIS Dinamis Toko</p>
                         
@@ -336,7 +334,6 @@ function PayContent() {
                             </div>
                         ) : qrisImage ? (
                             <div className="bg-white p-4 rounded-xl shadow-md border border-gray-100 animate-in fade-in duration-300">
-                                {/* Menampilkan Base64 Image */}
                                 <img src={qrisImage} alt="QRIS Dinamis" className="w-40 h-40 object-contain" />
                             </div>
                         ) : null}
@@ -369,15 +366,34 @@ function PayContent() {
                     </form>
                 </>
             ) : (
-                /* TAMPILAN SUKSES & TOMBOL DOWNLOAD INVOICE PDF */
+                /* TAMPILAN SUKSES & TOMBOL DOWNLOAD INVOICE PDF YANG DIPERBARUI */
                 <div className="py-2">
                     <span className="text-6xl animate-bounce inline-block">✅</span>
                     <h2 className="text-2xl font-black text-slate-900 mt-4 mb-2">Bukti Diterima!</h2>
-                    <p className="text-sm text-slate-600 mb-6 leading-relaxed">
-                        Terima kasih! Bukti transfer telah tersimpan aman di cloud storage. Silakan unduh dokumen invoice resmi di bawah ini sebagai jaminan transaksi.
-                    </p>
                     
-                    <div className="space-y-3 mb-4">
+                    {/* Teks Instruksi Baru */}
+                    <div className="text-sm text-slate-600 mb-6 leading-relaxed">
+                        Terima kasih, pesanan anda dalam proses verifikasi mohon tunggu pesan konfirmasi dari Admin via Contact Person yang sudah kamu cantumkan. Apabila dalam 1 X 12 jam tidak ada konfirmasi silakan download invoice berikut dan kirimkan ke nomor admin:
+                        
+                        {/* Tombol Copy Nomor Admin */}
+                        <div className="mt-4 flex justify-center">
+                            <div className="inline-flex items-center gap-3 bg-slate-100 border border-slate-200 rounded-xl px-4 py-2 shadow-sm">
+                                <span className="font-mono font-bold text-slate-800 tracking-wider text-base">085174237980 (Maul)</span>
+                                <button
+                                    onClick={handleCopyNumber}
+                                    className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1 ${
+                                        isCopied 
+                                        ? "bg-emerald-100 border-emerald-200 text-emerald-700" 
+                                        : "bg-white border-slate-300 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                                    }`}
+                                >
+                                    {isCopied ? '✅ Disalin' : '📋 Salin'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="space-y-3 mb-2">
                         <button
                             onClick={handleDownloadInvoicePDF}
                             className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold text-center transition-colors shadow-md text-sm flex items-center justify-center gap-2"
@@ -387,7 +403,7 @@ function PayContent() {
 
                         <Link 
                             href="/" 
-                            className="block w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl font-bold text-center transition-colors text-sm"
+                            className="block w-full bg-slate-900 hover:bg-slate-800 text-white py-3 rounded-xl font-bold text-center transition-colors text-sm shadow-md"
                         >
                             Kembali Ke Toko Utama
                         </Link>

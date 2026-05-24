@@ -21,6 +21,7 @@ export default function Home() {
   const [loading, setLoading] = useState<boolean>(true);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
+  const [cartBump, setCartBump] = useState<boolean>(false);
 
   // 1. Ambil produk dari Firestore & Load cart dari localStorage saat pertama kali dimuat
   useEffect(() => {
@@ -75,6 +76,10 @@ export default function Home() {
       }
       return [...prevCart, { ...product, quantity: 1 }];
     });
+    
+    // Animasi popping ketika user klik tambah produk:
+    setCartBump(true);
+    setTimeout(() => setCartBump(false), 300); // Animasi berhenti setelah 0.3 detik
   };
 
   const updateQuantity = (id: string, delta: number) => {
@@ -96,14 +101,32 @@ export default function Home() {
       <nav className="bg-white shadow-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-black tracking-tighter text-slate-900">BACANAU 25 STORE</h1>
-          <button onClick={() => setIsCartOpen(!isCartOpen)} className="relative p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition">
-            🛒 <span className="hidden sm:inline font-medium ml-1">Cart</span>
-            {totalItemsInCart > 0 && (
-              <span className="absolute top-0 right-0 -mt-1 -mr-1 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
-                {totalItemsInCart}
-              </span>
-            )}
-          </button>
+          
+          <div className="flex items-center gap-3">
+            {/* Tombol Search Buka Tab Baru */}
+            <Link 
+                href="/track" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center gap-2"
+            >
+                <span>🔍</span> <span className="hidden sm:inline">Cari Pesanan</span>
+            </Link>
+
+            {/* Tombol Keranjang dengan Animasi */}
+            <button 
+                onClick={() => setIsCartOpen(!isCartOpen)} 
+                className={`relative bg-slate-900 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all duration-300 ${cartBump ? 'scale-110 bg-indigo-600 shadow-lg' : ''}`}
+            >
+                <span>🛒</span> <span className="hidden sm:inline">Keranjang</span>
+                {totalItemsInCart > 0 && (
+                  <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center border-2 border-white">
+                    {totalItemsInCart}
+                  </span>
+                )}
+            </button>
+          </div>
+
         </div>
       </nav>
 
