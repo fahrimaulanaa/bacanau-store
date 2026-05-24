@@ -95,7 +95,7 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
       <nav className="bg-white shadow-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-black tracking-tighter text-slate-900">MAUL STORE</h1>
+          <h1 className="text-2xl font-black tracking-tighter text-slate-900">BACANAU 25 STORE</h1>
           <button onClick={() => setIsCartOpen(!isCartOpen)} className="relative p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition">
             🛒 <span className="hidden sm:inline font-medium ml-1">Cart</span>
             {totalItemsInCart > 0 && (
