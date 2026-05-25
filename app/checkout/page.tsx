@@ -91,7 +91,7 @@ export default function CheckoutPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     
                     {/* KOLOM KIRI: Ringkasan Barang & Metode Pembayaran */}
-                    <div className="space-y-6 sticky top-24 h-fit">
+                    <div className="space-y-6 md:sticky md:top-24 md:h-fit">
                         
                         {/* 1. Ringkasan Barang */}
                         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
