@@ -134,7 +134,7 @@ export default function AdminPage() {
     // LOGIKA & TEMPLATE: Generator Teks Hubungi via WA Otomatis
     const getWhatsAppLink = (order: Order) => {
         const contact = order.contactInfo;
-        const cleaned = contact.replace(/\D/g, ''); // Bersihkan karakter non-angka
+        const cleaned = contact.replace(/\D/g, ''); 
         
         let phone = '';
         if (cleaned.startsWith('08')) {
@@ -142,13 +142,11 @@ export default function AdminPage() {
         } else if (cleaned.startsWith('628')) {
             phone = cleaned;
         } else {
-            return null; // Jika input berupa ID Line atau teks biasa, tombol WA tidak dirender
+            return null; 
         }
 
-        // Susun teks daftar produk belanjaan pelanggan
         const itemsText = order.items?.map(item => `${item.name} - ${item.quantity}x`).join('\n') || '';
 
-        // Formulasi template pesan resmi BaCaNau store
         const messageTemplate = `Halo ${order.customerName}
 
 Terima kasih telah melakukan pemesanan di BaCaNau store, berikut adalah daftar pesanan anda:
@@ -160,7 +158,6 @@ Pesananan kamu sekarang sudah terkonfirmasi ya, ditunggu untuk info pengambilan 
 
 Terima Kasih`;
 
-        // URL Encode agar baris baru (\n) dan spasi terbaca sempurna oleh API WhatsApp
         return `https://wa.me/${phone}?text=${encodeURIComponent(messageTemplate)}`;
     };
 
@@ -233,9 +230,36 @@ Terima Kasih`;
                         <span className="bg-slate-900 text-white text-xs font-black px-2 py-1 rounded">PRO</span>
                         <h1 className="text-xl font-black tracking-tight text-slate-900">BACANAU ADMIN</h1>
                     </div>
-                    <div className="flex items-center gap-4">
-                        <span className="text-xs text-slate-500 font-medium hidden sm:inline">Logged as: {user.email}</span>
-                        <button onClick={handleLogout} className="text-xs font-bold text-red-600 hover:bg-red-50 px-3 py-2 rounded-xl border border-red-200 transition-colors">Keluar Panel</button>
+                    
+                    {/* BAGIAN NAVBAR KANAN: Refresh & Logout */}
+                    <div className="flex items-center gap-2 sm:gap-4">
+                        <span className="text-xs text-slate-500 font-medium hidden md:inline">Logged as: {user.email}</span>
+                        
+                        <button 
+                            onClick={loadAdminData}
+                            disabled={dataLoading}
+                            className="text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-xl border border-slate-200 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Tarik ulang data pesanan dan produk terbaru"
+                        >
+                            {dataLoading ? (
+                                <>
+                                    <span className="animate-spin inline-block">🔄</span> 
+                                    <span className="hidden sm:inline">Menyinkronkan...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span>🔄</span> 
+                                    <span className="hidden sm:inline">Refresh Data</span>
+                                </>
+                            )}
+                        </button>
+
+                        <button 
+                            onClick={handleLogout} 
+                            className="text-xs font-bold text-red-600 hover:bg-red-50 px-3 py-2 rounded-xl border border-red-200 transition-colors"
+                        >
+                            Keluar
+                        </button>
                     </div>
                 </div>
             </nav>
@@ -250,7 +274,8 @@ Terima Kasih`;
                     </button>
                 </div>
 
-                {dataLoading && <p className="text-xs text-slate-500 animate-pulse mb-4">Menyinkronkan data cloud Firestore...</p>}
+                {/* Indikator Loading Alternatif Saat Data Ditarik */}
+                {dataLoading && <p className="text-xs text-slate-500 animate-pulse mb-4 font-medium">Sedang menyinkronkan data cloud Firestore terbaru...</p>}
 
                 {/* TAB 1: VERIFIKASI PESANAN PEMBELI */}
                 {activeTab === 'orders' && (
@@ -261,7 +286,6 @@ Terima Kasih`;
                             </div>
                         ) : (
                             orders.map((order) => {
-                                // Panggil generator link teks dengan melemparkan seluruh objek order
                                 const waLink = getWhatsAppLink(order);
 
                                 return (
