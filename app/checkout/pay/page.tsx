@@ -9,6 +9,8 @@ import Link from 'next/link';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Tesseract from 'tesseract.js';
+import { Toaster, toast } from 'react-hot-toast'; 
+import emailjs from '@emailjs/browser'; 
 
 interface OrderItem {
     id: string;
@@ -29,8 +31,10 @@ function PayContent() {
     const [totalPay, setTotalPay] = useState<number>(0);
     const [baseTotal, setBaseTotal] = useState<number>(0);
     const [uniqueCode, setUniqueCode] = useState<number>(0);
+    const [paymentMethod, setPaymentMethod] = useState<string>('QRIS'); // State untuk metode pembayaran
     
     const [buyerName, setBuyerName] = useState<string>('');
+    const [buyerEmail, setBuyerEmail] = useState<string>(''); 
     const [buyerContact, setBuyerContact] = useState<string>('');
     const [buyerDomicile, setBuyerDomicile] = useState<string>('');
     const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -92,20 +96,22 @@ function PayContent() {
                     const paymentAmount = Number(orderData.totalPayment) || 0;
                     const itemsArr = orderData.items || [];
                     
-                    // Kalkulasi Total Asli vs Kode Unik
                     const calculatedBaseTotal = itemsArr.reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0);
-                    const calculatedUniqueCode = paymentAmount - calculatedBaseTotal;
-
                     setTotalPay(paymentAmount);
                     setBaseTotal(calculatedBaseTotal);
-                    setUniqueCode(calculatedUniqueCode);
+                    setUniqueCode(paymentAmount - calculatedBaseTotal);
                     
-                    setBuyerName(orderData.customerName || orderData.buyerName || 'Pelanggan');
+                    setBuyerName(orderData.customerName || 'Pelanggan');
+                    setBuyerEmail(orderData.customerEmail || ''); 
                     setBuyerContact(orderData.contactInfo || '-');
                     setBuyerDomicile(orderData.domicile || '-');
+                    setPaymentMethod(orderData.paymentMethod || 'QRIS'); // Set metode pembayaran dari DB
                     setOrderItems(itemsArr);
 
-                    fetchDynamicQris(paymentAmount);
+                    // Hanya generate QRIS jika yang dipilih QRIS
+                    if (orderData.paymentMethod === 'QRIS' || !orderData.paymentMethod) {
+                        fetchDynamicQris(paymentAmount);
+                    }
                 } else {
                     setErrorMsg("Data transaksi tidak ditemukan.");
                 }
@@ -119,10 +125,34 @@ function PayContent() {
         if (orderId) fetchOrderData();
     }, [orderId]);
 
+    // FUNGSI PENGIRIM EMAIL OTOMATIS
+    const sendAutomatedEmail = () => {
+        if (!buyerEmail) return;
+        
+        const templateParams = {
+            to_name: buyerName,
+            to_email: buyerEmail,
+            order_id: orderId,
+            total_amount: `Rp ${totalPay.toLocaleString('id-ID')}`,
+            status: "LUNAS (Verified by AI)"
+        };
+
+        emailjs.send('SERVICE_ID_KAMU', 'TEMPLATE_ID_KAMU', templateParams, 'PUBLIC_KEY_KAMU')
+            .then(() => toast.success(`Tanda terima terkirim ke Email: ${buyerEmail}`))
+            .catch(() => toast.error("Gagal mengirim email notifikasi."));
+    };
+
     const handleCopyNumber = () => {
         navigator.clipboard.writeText("085174237980");
         setIsCopied(true);
+        toast.success("Nomor Admin berhasil disalin!");
         setTimeout(() => setIsCopied(false), 2000); 
+    };
+
+    // FUNGSI COPY REKENING/EWALLET
+    const handleCopyRekening = (text: string, label: string) => {
+        navigator.clipboard.writeText(text);
+        toast.success(`${label} berhasil disalin!`);
     };
 
     const handleDownloadInvoicePDF = () => {
@@ -147,7 +177,7 @@ function PayContent() {
             const statusInvoice = isAutoVerified ? "LUNAS (AUTO-VERIFIED)" : "MENUNGGU VERIFIKASI MANUAL";
             
             docPdf.text(`Tanggal Cetak: ${tanggalSekarang}`, 115, 46);
-            docPdf.text(`Metode: QRIS Dinamis API`, 115, 52);
+            docPdf.text(`Metode: ${paymentMethod}`, 115, 52); // Masukkan metode di PDF
             docPdf.text(`Status: ${statusInvoice}`, 115, 58);
 
             const tableRows = orderItems.map((item, index) => [
@@ -174,12 +204,13 @@ function PayContent() {
             docPdf.setFont("Helvetica", "italic"); docPdf.setFontSize(8); docPdf.setTextColor(148, 163, 184); docPdf.text("Invoice ini sah sebagai bukti pembelian komoditas Bacanau Store.", 105, 282, { align: 'center' });
 
             docPdf.save(`Bacanau_Invoice_${orderId}.pdf`);
+            toast.success("Invoice PDF berhasil diunduh.");
         } catch (err) {
-            alert("Sistem gagal menyusun file PDF secara instan.");
+            toast.error("Sistem gagal menyusun file PDF secara instan.");
         }
     };
 
-// FUNGSI UPLOAD & OCR VERIFICATION (LEVEL KEAMANAN MAKSIMAL ANTI-KEBOCORAN)
+    // FUNGSI UPLOAD & OCR VERIFICATION 
     const handleUploadBukti = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!file || !orderId) return;
@@ -187,52 +218,36 @@ function PayContent() {
         setUploading(true);
         setIsAutoVerified(false);
         setScanStatus("Memindai struk dengan AI...");
+        const loadingToast = toast.loading("Memindai struk...");
 
         try {
-            // 1. Jalankan proses OCR
             const { data: { text } } = await Tesseract.recognize(file, 'ind');
             const targetNominal = totalPay.toString();
+            const lowerText = text.toLowerCase();
             
             let autoMatch = false;
 
-            // 2. LOGIKA SUPER KETAT: Gunakan Regex untuk mencari pola "Rp" yang MENEMPEL dengan angka
-            // Regex ini mencari teks berawalan r dan p (bisa dipisah spasi), lalu diikuti angka/titik/koma
-            const rpMatches = text.match(/r\s*p[\s\.\,\:\-]*[\d\s\.\,]+/gi);
-
-            if (rpMatches) {
-                // 3. Kita hanya membedah teks yang mengandung "Rp" di depannya
-                for (let match of rpMatches) {
-                    // Bersihkan teks temuan hingga menyisakan murni angkanya saja
-                    const cleanDigits = match.replace(/[^0-9]/g, '');
-                    
-                    // Cek apakah angka yang MENEMPEL dengan Rp tersebut sama persis dengan nominal tagihan (termasuk potensi tambahan ,00)
-                    if (cleanDigits === targetNominal || cleanDigits === targetNominal + "00") {
-                        autoMatch = true;
-                        break; 
+            if (lowerText.includes('rp')) {
+                const matches = text.match(/\d+[\.,]?\d*/g);
+                if (matches) {
+                    for (let m of matches) {
+                        const cleanDigits = m.replace(/[,\.]/g, '');
+                        if (cleanDigits === targetNominal || cleanDigits === targetNominal + "00" || cleanDigits === targetNominal + "0") {
+                            autoMatch = true;
+                            break; 
+                        }
                     }
                 }
             }
 
-            // 4. Tampilkan Pop-Up Notifikasi
-            if (autoMatch) {
-                setScanStatus("Nominal Sesuai! Mengunggah ke server...");
-                setOcrPopup({
-                    show: true,
-                    status: 'success',
-                    title: 'Verifikasi Berhasil! 🎉',
-                    message: 'Sistem menemukan bukti pembayaran berlabel "Rp" dengan nominal yang sesuai.'
-                });
-            } else {
-                setScanStatus("Mengirim bukti ke admin...");
-                setOcrPopup({
-                    show: true,
-                    status: 'error',
-                    title: 'Verifikasi Otomatis Gagal ⚠️',
-                    message: 'Format struk atau nominal tidak terbaca jelas oleh AI. Bukti pembayaran akan diteruskan ke Admin.'
-                });
-            }
+            toast.dismiss(loadingToast);
+            setOcrPopup({
+                show: true,
+                status: autoMatch ? 'success' : 'error',
+                title: autoMatch ? 'Verifikasi Berhasil! 🎉' : 'Manual Review Diperlukan ⚠️',
+                message: autoMatch ? 'Nominal sesuai.' : 'Nominal tidak terbaca otomatis oleh AI. Diteruskan ke Admin.'
+            });
 
-            // 5. Upload ke Supabase
             const fileExt = file.name.split('.').pop();
             const fileName = `${orderId}_bukti.${fileExt}`;
             const { data, error: uploadError } = await supabase.storage.from('bukti-pembayaran').upload(fileName, file, { cacheControl: '3600', upsert: true });
@@ -240,7 +255,6 @@ function PayContent() {
 
             const { data: { publicUrl } } = supabase.storage.from('bukti-pembayaran').getPublicUrl(fileName);
 
-            // 6. Update Firestore
             const newStatus = autoMatch ? "Selesai (Lunas)" : "Sudah Bayar (Mengecek Bukti)";
             await updateDoc(doc(db, "orders", orderId), {
                 paymentProofUrl: publicUrl,
@@ -248,15 +262,19 @@ function PayContent() {
                 updatedAt: new Date()
             });
 
-            // 7. Selesai (Tunggu animasi pop-up selesai)
             setTimeout(() => {
                 setOcrPopup(null);
                 setIsAutoVerified(autoMatch);
                 setUploadSuccess(true);
-            }, 4000);
+                
+                if (autoMatch) {
+                    sendAutomatedEmail();
+                }
+            }, 3000);
 
         } catch (error: any) {
-            alert(`Terjadi Kendala: ${error.message}`);
+            toast.dismiss(loadingToast);
+            toast.error(`Terjadi Kendala: ${error.message}`);
             setUploading(false);
         } 
     };
@@ -281,6 +299,8 @@ function PayContent() {
 
     return (
         <div className="relative">
+            <Toaster position="top-center" />
+            
             {ocrPopup && ocrPopup.show && (
                 <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-300">
                     <div className={`bg-white p-6 rounded-2xl shadow-2xl max-w-sm w-full text-center border-t-4 animate-in zoom-in-95 duration-300 ${ocrPopup.status === 'success' ? 'border-emerald-500' : 'border-amber-500'}`}>
@@ -326,22 +346,60 @@ function PayContent() {
                             </div>
                         </div>
 
+                        {/* RENDER INSTRUKSI PEMBAYARAN BERDASARKAN METODE YANG DIPILIH */}
                         <div className="bg-slate-50 border-2 border-dashed border-slate-200 p-6 flex flex-col items-center justify-center rounded-xl mb-6">
-                            <p className="text-sm font-bold text-slate-700 mb-4">Scan QRIS Dinamis Toko</p>
                             
-                            {isGeneratingQris ? (
-                                <div className="w-48 h-48 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-400 shadow-inner animate-pulse">Membentuk QRIS Dinamis...</div>
-                            ) : qrisError ? (
-                                <div className="w-48 h-48 bg-red-50 rounded-lg flex flex-col items-center justify-center text-xs text-red-500 shadow-inner border border-red-200 p-4 text-center">
-                                    <span className="text-2xl mb-1">⚠️</span><span>Gagal memuat API QRIS. Muat ulang halaman.</span>
-                                </div>
-                            ) : qrisImage ? (
-                                <div className="bg-white p-4 rounded-xl shadow-md border border-gray-100 animate-in fade-in duration-300">
-                                    <img src={qrisImage} alt="QRIS Dinamis" className="w-40 h-40 object-contain" />
-                                </div>
-                            ) : null}
+                            {paymentMethod === 'QRIS' && (
+                                <>
+                                    <p className="text-sm font-bold text-slate-700 mb-4">Scan QRIS Dinamis Toko</p>
+                                    {isGeneratingQris ? (
+                                        <div className="w-48 h-48 bg-gray-200 rounded-lg flex items-center justify-center text-xs text-gray-400 shadow-inner animate-pulse">Membentuk QRIS Dinamis...</div>
+                                    ) : qrisError ? (
+                                        <div className="w-48 h-48 bg-red-50 rounded-lg flex flex-col items-center justify-center text-xs text-red-500 shadow-inner border border-red-200 p-4 text-center">
+                                            <span className="text-2xl mb-1">⚠️</span><span>Gagal memuat API QRIS. Muat ulang halaman.</span>
+                                        </div>
+                                    ) : qrisImage ? (
+                                        <div className="bg-white p-4 rounded-xl shadow-md border border-gray-100 animate-in fade-in duration-300">
+                                            <img src={qrisImage} alt="QRIS Dinamis" className="w-40 h-40 object-contain" />
+                                        </div>
+                                    ) : null}
+                                    <p className="text-[11px] text-slate-500 mt-3 font-medium">Nominal otomatis terisi saat di-scan</p>
+                                </>
+                            )}
 
-                            <p className="text-[11px] text-slate-500 mt-3 font-medium">Nominal otomatis terisi saat di-scan</p>
+                            {paymentMethod === 'BCA' && (
+                                <div className="text-center w-full">
+                                    <img src="https://upload.wikimedia.org/wikipedia/commons/5/5c/Bank_Central_Asia.svg" alt="BCA" className="h-10 mx-auto mb-4 object-contain" />
+                                    <p className="text-sm font-bold text-slate-700 mb-2">Transfer ke Rekening BCA:</p>
+                                    <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm mb-3">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <p className="text-2xl font-black text-blue-600 tracking-wider font-mono">7751549117</p>
+                                            <button onClick={() => handleCopyRekening('7751549117', 'Rekening BCA')} className="text-slate-400 hover:text-blue-600 transition-colors">📋</button>
+                                        </div>
+                                        <p className="text-xs font-bold text-slate-500 mt-1 uppercase">A.N Fahri Maulana Al Ghazali</p>
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 font-medium">Pastikan transfer TEPAT sesuai nominal total hingga 2 digit terakhir.</p>
+                                </div>
+                            )}
+
+                            {paymentMethod === 'E-WALLET' && (
+                                <div className="text-center w-full">
+                                    <div className="flex justify-center gap-3 mb-4">
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/8/86/Gopay_logo.svg" alt="GoPay" className="h-6 object-contain" />
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/7/72/Logo_dana_blue.svg" alt="DANA" className="h-6 object-contain" />
+                                    </div>
+                                    <p className="text-sm font-bold text-slate-700 mb-2">Transfer ke Nomor E-Wallet:</p>
+                                    <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm mb-3">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <p className="text-2xl font-black text-sky-600 tracking-wider font-mono">085174237980</p>
+                                            <button onClick={() => handleCopyRekening('085174237980', 'Nomor E-Wallet')} className="text-slate-400 hover:text-sky-600 transition-colors">📋</button>
+                                        </div>
+                                        <p className="text-xs font-bold text-slate-500 mt-1 uppercase">A.N Fahri Maulana</p>
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 font-medium">Mendukung GoPay, DANA, OVO, ShopeePay, dsb.</p>
+                                </div>
+                            )}
+
                         </div>
 
                         <form onSubmit={handleUploadBukti} className="border-t pt-4 text-left space-y-3">
@@ -354,7 +412,7 @@ function PayContent() {
                                 onChange={(e) => { if (e.target.files && e.target.files[0]) setFile(e.target.files[0]); }} required 
                             />
                             <button
-                                type="submit" disabled={uploading || !file || isGeneratingQris || qrisError}
+                                type="submit" disabled={uploading || !file || (paymentMethod === 'QRIS' && (isGeneratingQris || qrisError))}
                                 className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white py-3 rounded-xl font-bold text-center transition-colors shadow-md text-sm"
                             >
                                 {uploading ? (
