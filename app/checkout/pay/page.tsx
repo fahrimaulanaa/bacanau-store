@@ -137,7 +137,7 @@ function PayContent() {
             status: "LUNAS (Verified by AI)"
         };
 
-        emailjs.send('SERVICE_ID_KAMU', 'TEMPLATE_ID_KAMU', templateParams, 'PUBLIC_KEY_KAMU')
+        emailjs.send('service_5f5q7r9', 'template_ble6ki6d', templateParams, 'D5jRZ-GnOQKPhIljJ')
             .then(() => toast.success(`Tanda terima terkirim ke Email: ${buyerEmail}`))
             .catch(() => toast.error("Gagal mengirim email notifikasi."));
     };
