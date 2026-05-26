@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   keywords: ['Bacanau Store', 'BaCaNau', 'Nautika ITB', 'Streetwear Bandung', 'Digital Art Bacanau'],
   authors: [{ name: 'Fahri Maulana' }],
   verification: {
-    google: 'PASTE_KODE_ACAK_DARI_GSC_DI_SINI', 
+    google: 'f8ik7ltUc0EBBLqJq-BuharKN-Xu7zBSpS3tO8PbjWI', 
     // Contoh dari gambarmu: 'ezN9lZ75WnD74od1ix3Rww8IsPREpnzT98z7J...'
   },
   openGraph: {
