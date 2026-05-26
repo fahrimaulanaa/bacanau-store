@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import Link from 'next/link';
 
@@ -10,7 +10,7 @@ interface Product {
   name: string;
   price: number;
   img: string;
-  isActive?: boolean; // Tambahan untuk mengecek status suspend
+  isActive?: boolean;
 }
 
 interface CartItem extends Product {
@@ -24,41 +24,39 @@ export default function Home() {
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [cartBump, setCartBump] = useState<boolean>(false);
 
-  // 1. Ambil produk dari Firestore & Load cart dari localStorage saat pertama kali dimuat
+  // 1. REAL-TIME LISTENER: Ambil produk dari Firestore secara Live
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, "products"));
-        const dataItems = querySnapshot.docs.map((doc) => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            name: data.name || data.nama_produk || data.nama,
-            price: Number(data.price || data.harga_produk || data.harga || 0),
-            img: data.img || data.url_gambar || data.gambar,
-            // Tarik status isActive. Jika tidak ada di DB, anggap true (aktif)
-            isActive: data.isActive !== undefined ? data.isActive : true, 
-          };
-        }) as Product[];
+    // onSnapshot akan terus memantau perubahan data (seperti saat admin klik suspend)
+    const unsubscribe = onSnapshot(collection(db, "products"), (querySnapshot) => {
+      const dataItems = querySnapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          name: data.name || data.nama_produk || data.nama,
+          price: Number(data.price || data.harga_produk || data.harga || 0),
+          img: data.img || data.url_gambar || data.gambar,
+          isActive: data.isActive !== undefined ? data.isActive : true, 
+        };
+      }) as Product[];
 
-        // FILTER: Hanya masukkan produk yang status isActive-nya tidak false (tidak disuspend)
-        const activeProducts = dataItems.filter(item => item.isActive !== false);
+      // FILTER: Hanya tampilkan produk yang aktif (tidak di-suspend)
+      const activeProducts = dataItems.filter(item => item.isActive !== false);
 
-        setProducts(activeProducts);
-      } catch (error) {
-        console.error("Error fetching products: ", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchProducts();
+      setProducts(activeProducts);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching products: ", error);
+      setLoading(false);
+    });
 
     // Load cart dari localStorage jika ada
     const savedCart = localStorage.getItem('cart');
     if (savedCart) {
       setCart(JSON.parse(savedCart));
     }
+
+    // Bersihkan listener saat halaman ditutup
+    return () => unsubscribe();
   }, []);
 
   // 2. Simpan cart ke localStorage setiap kali ada perubahan data cart
@@ -100,7 +98,6 @@ export default function Home() {
   const subTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const totalItemsInCart = cart.reduce((total, item) => total + item.quantity, 0);
   
-
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
       <nav className="bg-white shadow-sm sticky top-0 z-50">
@@ -141,7 +138,7 @@ export default function Home() {
           </div>
         ) : products.length === 0 ? (
           <div className="flex justify-center items-center h-64">
-            <p className="text-gray-500 font-medium">Belum ada produk di database.</p>
+            <p className="text-gray-500 font-medium">Belum ada produk aktif di database.</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
