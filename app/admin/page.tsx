@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, updateDoc, deleteDoc, addDoc } from 'firebase/firestore';
+import { collection, doc, updateDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from '../../lib/firebase'; 
 
@@ -29,6 +29,7 @@ interface Product {
     name: string;
     price: number;
     img: string;
+    isActive?: boolean; // Properti untuk status aktif/suspend produk
 }
 
 export default function AdminPage() {
@@ -59,41 +60,55 @@ export default function AdminPage() {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
             setAuthLoading(false);
-            if (currentUser) {
-                loadAdminData();
-            }
         });
         return () => unsubscribe();
     }, []);
 
-    // Load Data dari Firestore
-    const loadAdminData = async () => {
+    // REAL-TIME LISTENER (LIVE DETECT) FIRESTORE
+    useEffect(() => {
+        if (!user) {
+            setOrders([]);
+            setProducts([]);
+            return;
+        }
+
         setDataLoading(true);
-        try {
-            const orderSnap = await getDocs(collection(db, "orders"));
-            const orderList = orderSnap.docs.map(doc => ({
+
+        // 1. Live Listener untuk Koleksi Orders
+        const unsubscribeOrders = onSnapshot(collection(db, "orders"), (snapshot) => {
+            const orderList = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
             })) as Order[];
             setOrders(orderList.sort((a, b) => b.createdAt?.seconds - a.createdAt?.seconds));
+            setDataLoading(false);
+        }, (err) => {
+            console.error("Gagal memuat data orders:", err);
+            setDataLoading(false);
+        });
 
-            const prodSnap = await getDocs(collection(db, "products"));
-            const prodList = prodSnap.docs.map(doc => {
+        // 2. Live Listener untuk Koleksi Products
+        const unsubscribeProducts = onSnapshot(collection(db, "products"), (snapshot) => {
+            const prodList = snapshot.docs.map(doc => {
                 const d = doc.data();
                 return {
                     id: doc.id,
                     name: d.name || d.nama_produk || "Produk Tanpa Nama",
                     price: Number(d.price || d.harga_produk) || 0,
-                    img: d.img || d.url_gambar || ""
+                    img: d.img || d.url_gambar || "",
+                    isActive: d.isActive !== undefined ? d.isActive : true // Default true jika field belum ada
                 };
             }) as Product[];
             setProducts(prodList);
-        } catch (err) {
-            console.error("Gagal memuat data admin:", err);
-        } finally {
-            setDataLoading(false);
-        }
-    };
+        }, (err) => {
+            console.error("Gagal memuat data products:", err);
+        });
+
+        return () => {
+            unsubscribeOrders();
+            unsubscribeProducts();
+        };
+    }, [user]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -114,7 +129,6 @@ export default function AdminPage() {
         try {
             const orderRef = doc(db, "orders", orderId);
             await updateDoc(orderRef, { status: newStatus });
-            setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
         } catch (err) {
             alert("Gagal merubah status pesanan.");
         }
@@ -125,7 +139,6 @@ export default function AdminPage() {
         if (!confirm("Apakah Anda yakin ingin menghapus pesanan ini secara permanen?")) return;
         try {
             await deleteDoc(doc(db, "orders", orderId));
-            setOrders(orders.filter(o => o.id !== orderId));
         } catch (err) {
             alert("Gagal menghapus pesanan.");
         }
@@ -173,13 +186,23 @@ Terima Kasih`;
                 await updateDoc(doc(db, "products", editingProductId), productData);
                 alert("Produk berhasil diperbarui!");
             } else {
-                await addDoc(collection(db, "products"), productData);
+                // Produk baru otomatis memiliki properti isActive: true
+                await addDoc(collection(db, "products"), { ...productData, isActive: true });
                 alert("Produk baru berhasil ditambahkan!");
             }
             setProdName(''); setProdPrice(''); setProdImg(''); setEditingProductId(null);
-            loadAdminData();
         } catch (err) {
             alert("Gagal menyimpan data produk.");
+        }
+    };
+
+    // FUNGSI BARU: Toggle Suspend / Aktifkan Produk
+    const handleToggleSuspend = async (productId: string, currentStatus: boolean) => {
+        try {
+            const productRef = doc(db, "products", productId);
+            await updateDoc(productRef, { isActive: !currentStatus });
+        } catch (err) {
+            alert("Gagal mengubah status suspend produk.");
         }
     };
 
@@ -195,7 +218,6 @@ Terima Kasih`;
         if (!confirm("Apakah Anda yakin ingin menghapus produk ini dari katalog?")) return;
         try {
             await deleteDoc(doc(db, "products", productId));
-            setProducts(products.filter(p => p.id !== productId));
         } catch (err) {
             alert("Gagal menghapus produk.");
         }
@@ -231,28 +253,22 @@ Terima Kasih`;
                         <h1 className="text-xl font-black tracking-tight text-slate-900">BACANAU ADMIN</h1>
                     </div>
                     
-                    {/* BAGIAN NAVBAR KANAN: Refresh & Logout */}
                     <div className="flex items-center gap-2 sm:gap-4">
                         <span className="text-xs text-slate-500 font-medium hidden md:inline">Logged as: {user.email}</span>
                         
-                        <button 
-                            onClick={loadAdminData}
-                            disabled={dataLoading}
-                            className="text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-xl border border-slate-200 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                            title="Tarik ulang data pesanan dan produk terbaru"
-                        >
+                        <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-xl border border-slate-200 flex items-center gap-1.5 select-none">
                             {dataLoading ? (
                                 <>
                                     <span className="animate-spin inline-block">🔄</span> 
-                                    <span className="hidden sm:inline">Menyinkronkan...</span>
+                                    <span>Sinkronisasi...</span>
                                 </>
                             ) : (
                                 <>
-                                    <span>🔄</span> 
-                                    <span className="hidden sm:inline">Refresh Data</span>
+                                    <span>⚡</span> 
+                                    <span>Live Connected</span>
                                 </>
                             )}
-                        </button>
+                        </div>
 
                         <button 
                             onClick={handleLogout} 
@@ -274,9 +290,6 @@ Terima Kasih`;
                     </button>
                 </div>
 
-                {/* Indikator Loading Alternatif Saat Data Ditarik */}
-                {dataLoading && <p className="text-xs text-slate-500 animate-pulse mb-4 font-medium">Sedang menyinkronkan data cloud Firestore terbaru...</p>}
-
                 {/* TAB 1: VERIFIKASI PESANAN PEMBELI */}
                 {activeTab === 'orders' && (
                     <div className="space-y-4">
@@ -291,7 +304,6 @@ Terima Kasih`;
                                 return (
                                     <div key={order.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col md:flex-row gap-5 justify-between hover:border-slate-300 transition-colors">
                                         
-                                        {/* Bagian Kiri: Info Pembeli & Item */}
                                         <div className="space-y-4 flex-1">
                                             <div className="flex justify-between items-start">
                                                 <div>
@@ -304,7 +316,6 @@ Terima Kasih`;
                                                 </div>
                                             </div>
 
-                                            {/* Info Kontak & Domisili */}
                                             <div className="flex flex-wrap gap-4 items-center text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100">
                                                 <div className="flex items-center gap-2">
                                                     <span>📱 <span className="font-semibold">{order.contactInfo}</span></span>
@@ -334,7 +345,6 @@ Terima Kasih`;
                                             </div>
                                         </div>
 
-                                        {/* Bagian Kanan: Aksi, Status, & Hapus */}
                                         <div className="flex flex-col gap-3 md:min-w-[220px] border-t md:border-t-0 md:border-l border-slate-100 pt-4 md:pt-0 md:pl-5">
                                             <div>
                                                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">Bukti Transfer</label>
@@ -388,7 +398,7 @@ Terima Kasih`;
                     </div>
                 )}
 
-                {/* TAB 2: KELOLA KATALOG PRODUK (CRUD) */}
+                {/* TAB 2: KELOLA KATALOG PRODUK */}
                 {activeTab === 'products' && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
@@ -410,16 +420,27 @@ Terima Kasih`;
                                     <p className="text-sm text-slate-400 col-span-2 text-center py-8">Belum ada item produk terdaftar di database.</p>
                                 ) : (
                                     products.map((prod) => (
-                                        <div key={prod.id} className="flex gap-4 p-3 border border-slate-100 rounded-xl hover:shadow-md transition-shadow">
-                                            <img src={prod.img} alt={prod.name} className="w-16 h-16 object-cover rounded-lg bg-slate-100 border flex-shrink-0" />
+                                        <div key={prod.id} className={`flex gap-4 p-3 border rounded-xl transition-all ${prod.isActive ? 'border-slate-100 hover:shadow-md' : 'border-red-100 bg-red-50/20 opacity-75'}`}>
+                                            <div className="relative flex-shrink-0">
+                                                <img src={prod.img} alt={prod.name} className={`w-16 h-16 object-cover rounded-lg bg-slate-100 border ${!prod.isActive && 'grayscale'}`} />
+                                                {!prod.isActive && <div className="absolute inset-0 bg-black/40 text-[9px] text-white font-black flex items-center justify-center rounded-lg">SUSPENDED</div>}
+                                            </div>
                                             <div className="flex-1 min-w-0 flex flex-col justify-between">
                                                 <div>
                                                     <h4 className="font-bold text-sm text-slate-900 truncate">{prod.name}</h4>
                                                     <p className="text-xs text-slate-600 font-semibold mt-0.5">Rp {prod.price.toLocaleString('id-ID')}</p>
                                                 </div>
-                                                <div className="flex gap-2 mt-2">
-                                                    <button onClick={() => handleStartEdit(prod)} className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">Edit</button>
-                                                    <button onClick={() => handleDeleteProduct(prod.id)} className="text-[11px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg border border-red-100">Hapus</button>
+                                                <div className="flex gap-1.5 mt-2 flex-wrap">
+                                                    {/* TOMBOL TOGGLE SUSPEND / AKTIFKAN */}
+                                                    <button 
+                                                        type="button" 
+                                                        onClick={() => handleToggleSuspend(prod.id, prod.isActive ?? true)} 
+                                                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-colors ${prod.isActive ? 'text-amber-600 bg-amber-50 border-amber-200 hover:bg-amber-100' : 'text-emerald-600 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`}
+                                                    >
+                                                        {prod.isActive ? '⏸️ Suspend' : '▶️ Aktifkan'}
+                                                    </button>
+                                                    <button onClick={() => handleStartEdit(prod)} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">Edit</button>
+                                                    <button onClick={() => handleDeleteProduct(prod.id)} className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg border border-red-100">Hapus</button>
                                                 </div>
                                             </div>
                                         </div>

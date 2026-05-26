@@ -10,6 +10,7 @@ interface Product {
   name: string;
   price: number;
   img: string;
+  isActive?: boolean; // Tambahan untuk mengecek status suspend
 }
 
 interface CartItem extends Product {
@@ -32,15 +33,18 @@ export default function Home() {
           const data = doc.data();
           return {
             id: doc.id,
-            // Menyesuaikan nama field di Firestore kamu (misal: nama_produk, harga_produk)
             name: data.name || data.nama_produk || data.nama,
-            // Wajib dibungkus Number() untuk mengubah string menjadi angka bersih
             price: Number(data.price || data.harga_produk || data.harga || 0),
             img: data.img || data.url_gambar || data.gambar,
+            // Tarik status isActive. Jika tidak ada di DB, anggap true (aktif)
+            isActive: data.isActive !== undefined ? data.isActive : true, 
           };
         }) as Product[];
 
-        setProducts(dataItems);
+        // FILTER: Hanya masukkan produk yang status isActive-nya tidak false (tidak disuspend)
+        const activeProducts = dataItems.filter(item => item.isActive !== false);
+
+        setProducts(activeProducts);
       } catch (error) {
         console.error("Error fetching products: ", error);
       } finally {
@@ -95,6 +99,7 @@ export default function Home() {
 
   const subTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const totalItemsInCart = cart.reduce((total, item) => total + item.quantity, 0);
+  
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
@@ -106,7 +111,6 @@ export default function Home() {
             {/* Tombol Search Buka Tab Baru */}
             <Link 
                 href="/track" 
-                target="_blank" 
                 rel="noopener noreferrer"
                 className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center gap-2"
             >
