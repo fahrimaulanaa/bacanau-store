@@ -1,0 +1,12 @@
+import { MetadataRoute } from 'next';
+
+export default function robots(): MetadataRoute.Robots {
+  return {
+    rules: {
+      userAgent: '*',
+      allow: '/',
+      disallow: ['/admin', '/checkout/pay'], // Blokir halaman rahasia
+    },
+    sitemap: 'https://domain-bacanau-kamu.com/sitemap.xml',
+  };
+}
