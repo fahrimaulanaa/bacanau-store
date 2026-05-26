@@ -1,9 +1,21 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { collection, doc, updateDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from '../../lib/firebase'; 
+import {
+    Bar,
+    BarChart,
+    CartesianGrid,
+    Cell,
+    Pie,
+    PieChart,
+    ResponsiveContainer,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from 'recharts';
 
 interface OrderItem {
     id: string;
@@ -32,6 +44,35 @@ interface Product {
     isActive?: boolean; // Properti untuk status aktif/suspend produk
 }
 
+const DASHBOARD_COLORS = ['#0f172a', '#ef4444', '#3b82f6', '#10b981', '#f59e0b'];
+
+function formatCurrency(value: number) {
+    return `Rp ${value.toLocaleString('id-ID')}`;
+}
+
+function getCreatedAtDate(createdAt: any) {
+    if (!createdAt) return null;
+
+    if (typeof createdAt.toDate === 'function') {
+        return createdAt.toDate();
+    }
+
+    if (typeof createdAt.seconds === 'number') {
+        return new Date(createdAt.seconds * 1000);
+    }
+
+    const parsed = new Date(createdAt);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getDayKey(date: Date) {
+    return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function getDayLabel(date: Date) {
+    return date.toLocaleDateString('id-ID', { weekday: 'short' });
+}
+
 export default function AdminPage() {
     // Auth States
     const [user, setUser] = useState<User | null>(null);
@@ -41,7 +82,7 @@ export default function AdminPage() {
     const [loginError, setLoginError] = useState<string>('');
 
     // Dashboard States
-    const [activeTab, setActiveTab] = useState<'orders' | 'products'>('orders');
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products'>('dashboard');
     const [orders, setOrders] = useState<Order[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [dataLoading, setDataLoading] = useState<boolean>(false);
@@ -223,6 +264,103 @@ Terima Kasih`;
         }
     };
 
+    const dashboardData = useMemo(() => {
+        const totalOrders = orders.length;
+        const totalProducts = products.length;
+        const activeProducts = products.filter((product) => product.isActive ?? true).length;
+        const suspendedProducts = totalProducts - activeProducts;
+        const pendingOrders = orders.filter((order) => order.status === 'Menunggu Pembayaran').length;
+        const reviewingOrders = orders.filter((order) => order.status === 'Sudah Bayar (Mengecek Bukti)').length;
+        const completedOrders = orders.filter((order) => order.status === 'Selesai (Lunas)').length;
+        const canceledOrders = orders.filter((order) => order.status === 'Dibatalkan').length;
+
+        const grossRevenue = orders.reduce((sum, order) => sum + (Number(order.totalPayment) || 0), 0);
+        const completedRevenue = orders
+            .filter((order) => order.status === 'Selesai (Lunas)')
+            .reduce((sum, order) => sum + (Number(order.totalPayment) || 0), 0);
+        const averageOrderValue = totalOrders > 0 ? grossRevenue / totalOrders : 0;
+
+        const statusCounts = [
+            { name: 'Menunggu Pembayaran', value: pendingOrders },
+            { name: 'Mengecek Bukti', value: reviewingOrders },
+            { name: 'Selesai', value: completedOrders },
+            { name: 'Dibatalkan', value: canceledOrders },
+        ].filter((item) => item.value > 0);
+
+        const paymentMethodCounts = orders.reduce<Record<string, number>>((acc, order) => {
+            const method = order.paymentProofUrl || 'Tidak diketahui';
+            acc[method] = (acc[method] || 0) + 1;
+            return acc;
+        }, {});
+
+        const paymentMethodData = Object.entries(paymentMethodCounts).map(([name, value]) => ({ name, value }));
+
+        const recentDays = Array.from({ length: 7 }, (_, index) => {
+            const date = new Date();
+            date.setHours(0, 0, 0, 0);
+            date.setDate(date.getDate() - (6 - index));
+            return date;
+        });
+
+        const dailyCounts = recentDays.map((date) => {
+            const key = getDayKey(date);
+            const count = orders.filter((order) => {
+                const orderDate = getCreatedAtDate(order.createdAt);
+                return orderDate ? getDayKey(orderDate) === key : false;
+            }).length;
+
+            return {
+                name: getDayLabel(date),
+                count,
+            };
+        });
+
+        const topItemsMap = orders.flatMap((order) => order.items || []).reduce<Record<string, { name: string; quantity: number; revenue: number }>>((acc, item) => {
+            const quantity = Number(item.quantity) || 0;
+            const revenue = (Number(item.price) || 0) * quantity;
+            const current = acc[item.name] || { name: item.name, quantity: 0, revenue: 0 };
+
+            acc[item.name] = {
+                name: item.name,
+                quantity: current.quantity + quantity,
+                revenue: current.revenue + revenue,
+            };
+
+            return acc;
+        }, {});
+
+        const topItems = Object.values(topItemsMap)
+            .sort((a, b) => b.quantity - a.quantity)
+            .slice(0, 5);
+
+        const recentOrders = [...orders]
+            .sort((a, b) => {
+                const dateA = getCreatedAtDate(a.createdAt)?.getTime() || 0;
+                const dateB = getCreatedAtDate(b.createdAt)?.getTime() || 0;
+                return dateB - dateA;
+            })
+            .slice(0, 5);
+
+        return {
+            totalOrders,
+            totalProducts,
+            activeProducts,
+            suspendedProducts,
+            pendingOrders,
+            reviewingOrders,
+            completedOrders,
+            canceledOrders,
+            grossRevenue,
+            completedRevenue,
+            averageOrderValue,
+            statusCounts,
+            paymentMethodData,
+            dailyCounts,
+            topItems,
+            recentOrders,
+        };
+    }, [orders, products]);
+
     if (authLoading) return <div className="min-h-screen bg-slate-900 flex justify-center items-center text-white"><p className="animate-pulse">Memverifikasi Admin...</p></div>;
 
     if (!user) {
@@ -282,6 +420,9 @@ Terima Kasih`;
 
             <main className="max-w-7xl mx-auto px-4 py-8">
                 <div className="flex border-b border-slate-200 mb-6 gap-2">
+                    <button onClick={() => setActiveTab('dashboard')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'dashboard' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                        📊 Ringkasan ({orders.length} Pesanan)
+                    </button>
                     <button onClick={() => setActiveTab('orders')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'orders' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         📦 Verifikasi Pesanan ({orders.length})
                     </button>
@@ -289,6 +430,161 @@ Terima Kasih`;
                         👕 Kelola Katalog Produk ({products.length})
                     </button>
                 </div>
+
+                {activeTab === 'dashboard' && (
+                    <div className="space-y-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Total Pesanan</p>
+                                <p className="text-3xl font-black text-slate-900 mt-3">{dashboardData.totalOrders}</p>
+                                <p className="text-sm text-slate-500 mt-2">Semua pesanan yang tercatat di database.</p>
+                            </div>
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Pendapatan Kotor</p>
+                                <p className="text-3xl font-black text-emerald-600 mt-3">{formatCurrency(dashboardData.grossRevenue)}</p>
+                                <p className="text-sm text-slate-500 mt-2">Akumulasi total pembayaran dari semua pesanan.</p>
+                            </div>
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Pesanan Perlu Dicek</p>
+                                <p className="text-3xl font-black text-amber-600 mt-3">{dashboardData.pendingOrders + dashboardData.reviewingOrders}</p>
+                                <p className="text-sm text-slate-500 mt-2">Antrian yang belum selesai diproses.</p>
+                            </div>
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Produk Aktif</p>
+                                <p className="text-3xl font-black text-slate-900 mt-3">{dashboardData.activeProducts}/{dashboardData.totalProducts}</p>
+                                <p className="text-sm text-slate-500 mt-2">Katalog aktif dan yang sedang disuspend.</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                            <div className="xl:col-span-2 bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <div className="flex items-start justify-between gap-4 mb-6">
+                                    <div>
+                                        <h2 className="text-lg font-bold text-slate-900">Pergerakan Pesanan 7 Hari</h2>
+                                        <p className="text-sm text-slate-500">Frekuensi pesanan berdasarkan tanggal masuk.</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-xs uppercase font-bold text-slate-400">Rata-rata transaksi</p>
+                                        <p className="text-lg font-black text-slate-900">{formatCurrency(dashboardData.averageOrderValue)}</p>
+                                    </div>
+                                </div>
+                                <div className="h-[300px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={dashboardData.dailyCounts}>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                            <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 12 }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
+                                            <YAxis allowDecimals={false} tick={{ fill: '#64748b', fontSize: 12 }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
+                                            <Tooltip cursor={{ fill: 'rgba(15, 23, 42, 0.04)' }} formatter={(value) => [String(value), 'Pesanan']} />
+                                            <Bar dataKey="count" radius={[10, 10, 0, 0]} fill="#0f172a" />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <h2 className="text-lg font-bold text-slate-900 mb-2">Distribusi Status</h2>
+                                <p className="text-sm text-slate-500 mb-4">Ringkasan status pesanan saat ini.</p>
+                                <div className="h-[220px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart>
+                                            <Pie data={dashboardData.statusCounts} dataKey="value" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={4}>
+                                                {dashboardData.statusCounts.map((_, index) => (
+                                                    <Cell key={`status-${index}`} fill={DASHBOARD_COLORS[index % DASHBOARD_COLORS.length]} />
+                                                ))}
+                                            </Pie>
+                                            <Tooltip formatter={(value) => [String(value), 'Pesanan']} />
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                </div>
+                                <div className="space-y-3 mt-2">
+                                    {dashboardData.statusCounts.map((item, index) => (
+                                        <div key={item.name} className="flex items-center justify-between text-sm">
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: DASHBOARD_COLORS[index % DASHBOARD_COLORS.length] }} />
+                                                <span className="text-slate-600 font-medium">{item.name}</span>
+                                            </div>
+                                            <span className="font-bold text-slate-900">{item.value}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <div className="flex items-start justify-between gap-4 mb-4">
+                                    <div>
+                                        <h2 className="text-lg font-bold text-slate-900">Produk Terlaris</h2>
+                                        <p className="text-sm text-slate-500">Diurutkan berdasarkan jumlah item terjual.</p>
+                                    </div>
+                                    <div className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-full px-3 py-1">
+                                        {dashboardData.completedRevenue > 0 ? formatCurrency(dashboardData.completedRevenue) : 'Belum ada penjualan selesai'}
+                                    </div>
+                                </div>
+                                <div className="space-y-3">
+                                    {dashboardData.topItems.length === 0 ? (
+                                        <div className="text-sm text-slate-400 bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
+                                            Belum ada item yang bisa dirangkum dari pesanan.
+                                        </div>
+                                    ) : (
+                                        dashboardData.topItems.map((item, index) => (
+                                            <div key={`${item.name}-${index}`} className="flex items-center justify-between gap-4 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                                                <div>
+                                                    <p className="font-semibold text-slate-900">{item.name}</p>
+                                                    <p className="text-xs text-slate-500">{item.quantity} item terjual</p>
+                                                </div>
+                                                <p className="text-sm font-bold text-slate-700">{formatCurrency(item.revenue)}</p>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <h2 className="text-lg font-bold text-slate-900 mb-4">Pesanan Terbaru</h2>
+                                <div className="space-y-3">
+                                    {dashboardData.recentOrders.length === 0 ? (
+                                        <div className="text-sm text-slate-400 bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
+                                            Belum ada pesanan terbaru untuk ditampilkan.
+                                        </div>
+                                    ) : (
+                                        dashboardData.recentOrders.map((order) => (
+                                            <div key={order.id} className="flex items-center justify-between gap-4 p-3 rounded-xl bg-slate-50 border border-slate-100">
+                                                <div>
+                                                    <p className="font-semibold text-slate-900">{order.customerName}</p>
+                                                    <p className="text-xs text-slate-500">{order.status}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="font-bold text-slate-900">{formatCurrency(Number(order.totalPayment) || 0)}</p>
+                                                    <p className="text-xs text-slate-500">{getCreatedAtDate(order.createdAt)?.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) || 'Tanggal tidak tersedia'}</p>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Selesai</p>
+                                <p className="text-2xl font-black text-emerald-600 mt-2">{dashboardData.completedOrders}</p>
+                            </div>
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Menunggu</p>
+                                <p className="text-2xl font-black text-slate-900 mt-2">{dashboardData.pendingOrders}</p>
+                            </div>
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Mengecek Bukti</p>
+                                <p className="text-2xl font-black text-blue-600 mt-2">{dashboardData.reviewingOrders}</p>
+                            </div>
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Produk Disuspend</p>
+                                <p className="text-2xl font-black text-red-600 mt-2">{dashboardData.suspendedProducts}</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* TAB 1: VERIFIKASI PESANAN PEMBELI */}
                 {activeTab === 'orders' && (
