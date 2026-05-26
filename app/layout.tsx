@@ -5,8 +5,12 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Bacanau Store | Platform Apparel & Digital Art Kampus',
   description: 'Official e-commerce Bacanau Store. Beli merchandise eksklusif, apparel streetwear, dan digital art dengan pembayaran QRIS otomatis. Melayani pengiriman ke Jatinangor, Ganesha, dan sekitarnya.',
-  keywords: ['Bacanau Store', 'Apparel Kampus', 'Merchandise ITB', 'Streetwear Bandung', 'Digital Art Bacanau'],
+  keywords: ['Bacanau Store', 'BaCaNau', 'Nautika ITB', 'Streetwear Bandung', 'Digital Art Bacanau'],
   authors: [{ name: 'Fahri Maulana' }],
+  verification: {
+    google: 'PASTE_KODE_ACAK_DARI_GSC_DI_SINI', 
+    // Contoh dari gambarmu: 'ezN9lZ75WnD74od1ix3Rww8IsPREpnzT98z7J...'
+  },
   openGraph: {
     title: 'Bacanau Store | Apparel & Digital Art',
     description: 'Official e-commerce Bacanau Store. Beli merchandise eksklusif dengan mudah.',
