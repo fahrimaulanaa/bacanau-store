@@ -4,6 +4,8 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { collection, doc, updateDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth } from '../../lib/firebase'; 
+import { supabase } from '../../lib/supabase';
+import imageCompression from 'browser-image-compression';
 import {
     Bar,
     BarChart,
@@ -33,7 +35,7 @@ interface Order {
     status: string;
     paymentProofUrl?: string;
     items: OrderItem[];
-    createdAt: any;
+    createdAt: unknown;
 }
 
 interface Product {
@@ -50,19 +52,23 @@ function formatCurrency(value: number) {
     return `Rp ${value.toLocaleString('id-ID')}`;
 }
 
-function getCreatedAtDate(createdAt: any) {
+function getCreatedAtDate(createdAt: unknown) {
     if (!createdAt) return null;
 
-    if (typeof createdAt.toDate === 'function') {
+    if (typeof createdAt === 'object' && createdAt !== null && 'toDate' in createdAt && typeof createdAt.toDate === 'function') {
         return createdAt.toDate();
     }
 
-    if (typeof createdAt.seconds === 'number') {
+    if (typeof createdAt === 'object' && createdAt !== null && 'seconds' in createdAt && typeof createdAt.seconds === 'number') {
         return new Date(createdAt.seconds * 1000);
     }
 
-    const parsed = new Date(createdAt);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
+    if (typeof createdAt === 'string' || typeof createdAt === 'number' || createdAt instanceof Date) {
+        const parsed = new Date(createdAt);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    return null;
 }
 
 function getDayKey(date: Date) {
@@ -91,15 +97,39 @@ export default function AdminPage() {
     const [prodName, setProdName] = useState<string>('');
     const [prodPrice, setProdPrice] = useState<string>('');
     const [prodImg, setProdImg] = useState<string>('');
+    const [prodImageFile, setProdImageFile] = useState<File | null>(null);
+    const [savingProduct, setSavingProduct] = useState<boolean>(false);
     const [editingProductId, setEditingProductId] = useState<string | null>(null);
 
     // State Modal Bukti Pembayaran
     const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null);
+    const prodImagePreview = useMemo(() => {
+        if (prodImageFile) {
+            return URL.createObjectURL(prodImageFile);
+        }
+
+        return prodImg;
+    }, [prodImageFile, prodImg]);
+
+    useEffect(() => {
+        return () => {
+            if (prodImagePreview.startsWith('blob:')) {
+                URL.revokeObjectURL(prodImagePreview);
+            }
+        };
+    }, [prodImagePreview]);
 
     // Monitor Status Login
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
+            if (!currentUser) {
+                setOrders([]);
+                setProducts([]);
+                setDataLoading(false);
+            } else {
+                setDataLoading(true);
+            }
             setAuthLoading(false);
         });
         return () => unsubscribe();
@@ -108,20 +138,19 @@ export default function AdminPage() {
     // REAL-TIME LISTENER (LIVE DETECT) FIRESTORE
     useEffect(() => {
         if (!user) {
-            setOrders([]);
-            setProducts([]);
             return;
         }
-
-        setDataLoading(true);
-
         // 1. Live Listener untuk Koleksi Orders
         const unsubscribeOrders = onSnapshot(collection(db, "orders"), (snapshot) => {
             const orderList = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
             })) as Order[];
-            setOrders(orderList.sort((a, b) => b.createdAt?.seconds - a.createdAt?.seconds));
+            setOrders(orderList.sort((a, b) => {
+                const dateA = getCreatedAtDate(a.createdAt)?.getTime() || 0;
+                const dateB = getCreatedAtDate(b.createdAt)?.getTime() || 0;
+                return dateB - dateA;
+            }));
             setDataLoading(false);
         }, () => {
             setDataLoading(false);
@@ -217,10 +246,35 @@ Terima Kasih`;
     // FUNGSI PRODUK: Save, Edit, Delete
     const handleSaveProduct = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!prodName || !prodPrice || !prodImg) return;
+        if (!prodName || !prodPrice || (!prodImg && !prodImageFile)) return;
 
+        setSavingProduct(true);
         try {
-            const productData = { name: prodName, price: Number(prodPrice.replace(/[^0-9]/g, '')), img: prodImg };
+            let productImageUrl = prodImg;
+
+            if (prodImageFile) {
+                const compressedImage = await imageCompression(prodImageFile, {
+                    maxSizeMB: 0.5,
+                    maxWidthOrHeight: 1600,
+                    useWebWorker: true,
+                    fileType: 'image/jpeg',
+                    initialQuality: 0.8,
+                });
+                const safeName = prodName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'produk';
+                const fileName = `${editingProductId || Date.now()}-${safeName}.jpg`;
+                const uploadFile = new File([compressedImage], fileName, { type: 'image/jpeg' });
+                const { error: uploadError } = await supabase.storage.from('produk').upload(fileName, uploadFile, {
+                    cacheControl: '3600',
+                    upsert: true,
+                });
+
+                if (uploadError) throw uploadError;
+
+                const { data: { publicUrl } } = supabase.storage.from('produk').getPublicUrl(fileName);
+                productImageUrl = publicUrl;
+            }
+
+            const productData = { name: prodName, price: Number(prodPrice.replace(/[^0-9]/g, '')), img: productImageUrl };
 
             if (editingProductId) {
                 await updateDoc(doc(db, "products", editingProductId), productData);
@@ -230,9 +284,11 @@ Terima Kasih`;
                 await addDoc(collection(db, "products"), { ...productData, isActive: true });
                 alert("Produk baru berhasil ditambahkan!");
             }
-            setProdName(''); setProdPrice(''); setProdImg(''); setEditingProductId(null);
+            setProdName(''); setProdPrice(''); setProdImg(''); setProdImageFile(null); setEditingProductId(null);
         } catch {
-            alert("Gagal menyimpan data produk.");
+            alert("Gagal menyimpan data produk. Pastikan bucket Supabase 'produk' sudah dibuat dan policy upload publik/admin sudah aktif.");
+        } finally {
+            setSavingProduct(false);
         }
     };
 
@@ -247,11 +303,11 @@ Terima Kasih`;
     };
 
     const handleStartEdit = (product: Product) => {
-        setEditingProductId(product.id); setProdName(product.name); setProdPrice(product.price.toString()); setProdImg(product.img);
+        setEditingProductId(product.id); setProdName(product.name); setProdPrice(product.price.toString()); setProdImg(product.img); setProdImageFile(null);
     };
 
     const handleCancelEdit = () => {
-        setEditingProductId(null); setProdName(''); setProdPrice(''); setProdImg('');
+        setEditingProductId(null); setProdName(''); setProdPrice(''); setProdImg(''); setProdImageFile(null);
     };
 
     const handleDeleteProduct = async (productId: string) => {
@@ -701,9 +757,44 @@ Terima Kasih`;
                             <form onSubmit={handleSaveProduct} className="space-y-4">
                                 <input type="text" placeholder="Nama Produk" className="w-full border p-3 rounded-xl text-sm" value={prodName} onChange={(e) => setProdName(e.target.value)} required />
                                 <input type="number" placeholder="Harga (Rupiah)" className="w-full border p-3 rounded-xl text-sm" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} required />
-                                <input type="url" placeholder="URL Link Gambar" className="w-full border p-3 rounded-xl text-sm" value={prodImg} onChange={(e) => setProdImg(e.target.value)} required />
+                                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                    <label className="block text-xs font-bold uppercase text-slate-500">Gambar Produk</label>
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="w-full text-sm text-slate-500 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-slate-800"
+                                        onChange={(e) => setProdImageFile(e.target.files?.[0] || null)}
+                                    />
+                                    <div className="flex items-center gap-2">
+                                        <div className="h-px flex-1 bg-slate-200" />
+                                        <span className="text-[10px] font-bold uppercase text-slate-400">atau</span>
+                                        <div className="h-px flex-1 bg-slate-200" />
+                                    </div>
+                                    <input
+                                        type="url"
+                                        placeholder="URL Link Gambar"
+                                        className="w-full border border-slate-200 bg-white p-3 rounded-xl text-sm"
+                                        value={prodImg}
+                                        onChange={(e) => setProdImg(e.target.value)}
+                                    />
+                                    {prodImagePreview && (
+                                        <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2">
+                                            <img
+                                                src={prodImagePreview}
+                                                alt="Preview produk"
+                                                className="h-14 w-14 rounded-lg border border-slate-100 object-cover"
+                                            />
+                                            <div className="min-w-0">
+                                                <p className="text-xs font-bold text-slate-700 truncate">{prodImageFile ? prodImageFile.name : 'Preview dari URL'}</p>
+                                                <p className="text-[11px] text-slate-400">Upload file akan dikompres otomatis.</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="space-y-2 pt-2">
-                                    <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">{editingProductId ? "Simpan Perubahan" : "Terbitkan Produk"}</button>
+                                    <button type="submit" disabled={savingProduct} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold disabled:bg-slate-400">
+                                        {savingProduct ? "Menyimpan..." : editingProductId ? "Simpan Perubahan" : "Terbitkan Produk"}
+                                    </button>
                                     {editingProductId && <button type="button" onClick={handleCancelEdit} className="w-full bg-slate-100 text-slate-700 py-2 rounded-xl font-medium text-xs">Batalkan Edit</button>}
                                 </div>
                             </form>

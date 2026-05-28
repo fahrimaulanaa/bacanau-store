@@ -11,6 +11,7 @@ import autoTable from 'jspdf-autotable';
 import Tesseract from 'tesseract.js';
 import { Toaster, toast } from 'react-hot-toast'; 
 import emailjs from '@emailjs/browser'; 
+import imageCompression from 'browser-image-compression';
 
 interface OrderItem {
     id: string;
@@ -23,7 +24,6 @@ function PayContent() {
     const searchParams = useSearchParams();
     const orderId = searchParams.get('id') || '';
     
-    const [mounted, setMounted] = useState<boolean>(false);
     const [loadingData, setLoadingData] = useState<boolean>(true);
     const [errorMsg, setErrorMsg] = useState<string>('');
 
@@ -72,7 +72,7 @@ function PayContent() {
             } else {
                 setQrisError(true);
             }
-        } catch (error) {
+        } catch {
             setQrisError(true);
         } finally {
             setIsGeneratingQris(false);
@@ -80,7 +80,6 @@ function PayContent() {
     };
 
     useEffect(() => {
-        setMounted(true);
         const fetchOrderData = async () => {
             if (!orderId) {
                 setErrorMsg("ID Pesanan tidak valid.");
@@ -94,9 +93,9 @@ function PayContent() {
                 if (docSnap.exists()) {
                     const orderData = docSnap.data();
                     const paymentAmount = Number(orderData.totalPayment) || 0;
-                    const itemsArr = orderData.items || [];
+                    const itemsArr = (orderData.items || []) as OrderItem[];
                     
-                    const calculatedBaseTotal = itemsArr.reduce((sum: number, item: any) => sum + (item.price * item.quantity), 0);
+                    const calculatedBaseTotal = itemsArr.reduce((sum: number, item) => sum + (item.price * item.quantity), 0);
                     setTotalPay(paymentAmount);
                     setBaseTotal(calculatedBaseTotal);
                     setUniqueCode(paymentAmount - calculatedBaseTotal);
@@ -115,7 +114,7 @@ function PayContent() {
                 } else {
                     setErrorMsg("Data transaksi tidak ditemukan.");
                 }
-            } catch (error) {
+            } catch {
                 setErrorMsg("Gagal terhubung ke database server.");
             } finally {
                 setLoadingData(false);
@@ -205,9 +204,24 @@ function PayContent() {
 
             docPdf.save(`Bacanau_Invoice_${orderId}.pdf`);
             toast.success("Invoice PDF berhasil diunduh.");
-        } catch (err) {
+        } catch {
             toast.error("Sistem gagal menyusun file PDF secara instan.");
         }
+    };
+
+    const handleDownloadQris = () => {
+        if (!qrisImage) {
+            toast.error("QRIS belum siap diunduh.");
+            return;
+        }
+
+        const downloadLink = document.createElement('a');
+        downloadLink.href = qrisImage;
+        downloadLink.download = `QRIS_Bacanau_${orderId || 'pembayaran'}.png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+        toast.success("QRIS berhasil diunduh.");
     };
 
     // FUNGSI UPLOAD & OCR VERIFICATION 
@@ -230,7 +244,7 @@ function PayContent() {
             if (lowerText.includes('rp')) {
                 const matches = text.match(/\d+[\.,]?\d*/g);
                 if (matches) {
-                    for (let m of matches) {
+                    for (const m of matches) {
                         const cleanDigits = m.replace(/[,\.]/g, '');
                         if (cleanDigits === targetNominal || cleanDigits === targetNominal + "00" || cleanDigits === targetNominal + "0") {
                             autoMatch = true;
@@ -248,9 +262,18 @@ function PayContent() {
                 message: autoMatch ? 'Nominal sesuai.' : 'Nominal tidak terbaca otomatis oleh AI. Diteruskan ke Admin.'
             });
 
-            const fileExt = file.name.split('.').pop();
+            setScanStatus("Mengompres bukti bayar...");
+            const compressedFile = await imageCompression(file, {
+                maxSizeMB: 0.35,
+                maxWidthOrHeight: 1400,
+                useWebWorker: true,
+                fileType: 'image/jpeg',
+                initialQuality: 0.75,
+            });
+            const uploadFile = new File([compressedFile], `${orderId}_bukti.jpg`, { type: 'image/jpeg' });
+            const fileExt = 'jpg';
             const fileName = `${orderId}_bukti.${fileExt}`;
-            const { data, error: uploadError } = await supabase.storage.from('bukti-pembayaran').upload(fileName, file, { cacheControl: '3600', upsert: true });
+            const { error: uploadError } = await supabase.storage.from('bukti-pembayaran').upload(fileName, uploadFile, { cacheControl: '3600', upsert: true });
             if (uploadError) throw uploadError;
 
             const { data: { publicUrl } } = supabase.storage.from('bukti-pembayaran').getPublicUrl(fileName);
@@ -272,14 +295,14 @@ function PayContent() {
                 }
             }, 3000);
 
-        } catch (error: any) {
+        } catch {
             toast.dismiss(loadingToast);
-            toast.error(`Terjadi Kendala: ${error.message}`);
+            toast.error("Terjadi kendala saat memproses bukti bayar.");
             setUploading(false);
         } 
     };
 
-    if (!mounted || loadingData) {
+    if (loadingData) {
         return (
             <div className="text-center py-12">
                 <p className="text-gray-500 font-medium animate-pulse">Menghubungkan jalur proteksi data...</p>
@@ -359,9 +382,19 @@ function PayContent() {
                                             <span className="text-2xl mb-1">⚠️</span><span>Gagal memuat API QRIS. Muat ulang halaman.</span>
                                         </div>
                                     ) : qrisImage ? (
-                                        <div className="bg-white p-4 rounded-xl shadow-md border border-gray-100 animate-in fade-in duration-300">
-                                            <img src={qrisImage} alt="QRIS Dinamis" className="w-40 h-40 object-contain" />
-                                        </div>
+                                        <>
+                                            <div className="bg-white p-4 rounded-xl shadow-md border border-gray-100 animate-in fade-in duration-300">
+                                                <img src={qrisImage} alt="QRIS Dinamis" className="w-40 h-40 object-contain" />
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={handleDownloadQris}
+                                                className="mt-4 w-full max-w-[220px] bg-slate-900 hover:bg-slate-800 text-white py-2.5 rounded-xl font-bold text-xs transition-colors shadow-sm flex items-center justify-center gap-2"
+                                            >
+                                                <span>Download</span>
+                                                <span>QRIS</span>
+                                            </button>
+                                        </>
                                     ) : null}
                                     <p className="text-[11px] text-slate-500 mt-3 font-medium">Nominal otomatis terisi saat di-scan</p>
                                 </>
