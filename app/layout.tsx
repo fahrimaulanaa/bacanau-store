@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Bacanau Store | Platform Apparel & Digital Art Kampus',
-  description: 'Official e-commerce Bacanau Store. Beli merchandise eksklusif, apparel streetwear, dan digital art dengan pembayaran QRIS otomatis. Melayani pengiriman ke Jatinangor, Ganesha, dan sekitarnya.',
+  description: 'Official e-commerce Bacanau Store. Beli apapun yang kami jual hehe',
   keywords: ['Bacanau Store', 'BaCaNau', 'Nautika ITB', 'Streetwear Bandung', 'Digital Art Bacanau'],
   authors: [{ name: 'Fahri Maulana' }],
   verification: {
@@ -14,11 +14,11 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Bacanau Store | Apparel & Digital Art',
     description: 'Official e-commerce Bacanau Store. Beli merchandise eksklusif dengan mudah.',
-    url: 'https://domain-bacanau-kamu.com', // Ganti dengan domain aslimu nanti
+    url: 'https://bacanaustore.netlify.app', // Ganti dengan domain aslimu nanti
     siteName: 'Bacanau Store',
     images: [
       {
-        url: 'https://domain-bacanau-kamu.com/banner-toko.jpg', // Ganti dengan URL gambar logomu
+        url: '../public/logo_bacanau_25.png', // Ganti dengan URL gambar logomu
         width: 1200,
         height: 630,
       },

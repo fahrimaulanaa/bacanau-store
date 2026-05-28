@@ -1,10 +1,15 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import React, { useState, Suspense, useEffect } from 'react';
+import React, { useState, Suspense, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../../lib/firebase'; // Sesuaikan path jika letak folder berbeda
 import Link from 'next/link';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { Toaster, toast } from 'react-hot-toast';
+import Image from 'next/image';
 
 function TrackContent() {
     const searchParams = useSearchParams();
@@ -13,36 +18,171 @@ function TrackContent() {
 
     const [orderId, setOrderId] = useState<string>(urlId);
     const [orderData, setOrderData] = useState<any>(null);
+    const [searchResults, setSearchResults] = useState<any[] | null>(null);
     const [loading, setLoading] = useState<boolean>(false);
     const [errorMsg, setErrorMsg] = useState<string>('');
+    const [qrisImage, setQrisImage] = useState<string>('');
+    const [isGeneratingQris, setIsGeneratingQris] = useState<boolean>(false);
+    const [qrisError, setQrisError] = useState<boolean>(false);
 
-    const fetchOrder = async (idToFetch: string) => {
+    const normalizePhone = (raw: string) => {
+        if (!raw) return raw;
+        const digits = raw.replace(/\D/g, '');
+        if (digits.startsWith('0')) return '62' + digits.substring(1);
+        if (digits.startsWith('62')) return digits;
+        return digits;
+    };
+
+    const fetchOrder = useCallback(async (idToFetch: string) => {
         if (!idToFetch) return;
         setLoading(true);
         setErrorMsg('');
+        setSearchResults(null);
         try {
+            // 1) Coba treat input sebagai ID dokumen
             const docRef = doc(db, "orders", idToFetch);
             const docSnap = await getDoc(docRef);
 
             if (docSnap.exists()) {
                 setOrderData({ id: docSnap.id, ...docSnap.data() });
-            } else {
-                setOrderData(null);
-                setErrorMsg("Pesanan tidak ditemukan. Pastikan ID Pesanan benar.");
+                return;
             }
-        } catch (error) {
+
+            // 2) Jika bukan ID, coba query berdasarkan email atau nomor HP
+            // Deteksi email
+            if (idToFetch.includes('@')) {
+                const q = query(collection(db, 'orders'), where('customerEmail', '==', idToFetch));
+                const snap = await getDocs(q);
+                if (!snap.empty) {
+                    if (snap.size === 1) {
+                        const d = snap.docs[0];
+                        setOrderData({ id: d.id, ...d.data() });
+                        return;
+                    }
+                    setSearchResults(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+                    return;
+                }
+            }
+
+            // 3) Coba nomor telepon (sederhana: cari exact match di contactInfo)
+            const phoneCandidates = [idToFetch];
+            // juga coba konversi 08xxx -> 628xx
+            const cleaned = idToFetch.replace(/\D/g, '');
+            if (cleaned.startsWith('08')) phoneCandidates.push('62' + cleaned.substring(1));
+            if (cleaned.startsWith('628')) phoneCandidates.push('0' + cleaned.substring(2));
+
+            for (const candidate of phoneCandidates) {
+                const normalized = normalizePhone(candidate);
+                // try both raw and normalized forms
+                const q2 = query(collection(db, 'orders'), where('contactInfo', 'in', [candidate, normalized]));
+                const snap2 = await getDocs(q2);
+                if (!snap2.empty) {
+                    if (snap2.size === 1) {
+                        const d = snap2.docs[0];
+                        setOrderData({ id: d.id, ...d.data() });
+                        return;
+                    }
+                    setSearchResults(snap2.docs.map(d => ({ id: d.id, ...d.data() })));
+                    return;
+                }
+            }
+            setOrderData(null);
+            setErrorMsg("Pesanan tidak ditemukan. Pastikan ID / Email / Nomor WA benar.");
+        } catch {
             setErrorMsg("Gagal terhubung ke server.");
         } finally {
             setLoading(false);
+        }
+    }, []);
+
+    const fetchDynamicQris = async (amount: number) => {
+        setIsGeneratingQris(true);
+        setQrisError(false);
+        try {
+            const staticQris = "00020101021126570011ID.DANA.WWW011893600915300024307302090002430730303UMI51440014ID.CO.QRIS.WWW0215ID10254666263850303UMI5204549953033605802ID5914Puding Hambali600412026105612566304027C";
+            const res = await fetch('/api/qris', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount: amount.toString(), qris_statis: staticQris })
+            });
+            const data = await res.json();
+            if (data.status === 'success' && data.qris_base64) {
+                const base64Str = data.qris_base64.startsWith('data:image') ? data.qris_base64 : `data:image/png;base64,${data.qris_base64}`;
+                setQrisImage(base64Str);
+            } else {
+                setQrisError(true);
+            }
+        } catch {
+            setQrisError(true);
+        } finally {
+            setIsGeneratingQris(false);
+        }
+    };
+
+    const handleDownloadQris = () => {
+        if (!qrisImage) return toast.error('QRIS belum siap diunduh');
+        const a = document.createElement('a'); a.href = qrisImage; a.download = `QRIS_${orderData?.id || 'pembayaran'}.png`; document.body.appendChild(a); a.click(); a.remove();
+        toast.success('QRIS diunduh');
+    };
+
+    const handleDownloadInvoicePDF = () => {
+        try {
+            const docPdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            const orderIdLocal = orderData?.id || 'unknown';
+            const buyerName = orderData?.customerName || '-';
+            const buyerContact = orderData?.contactInfo || '-';
+            const buyerDomicile = orderData?.domicile || '-';
+            const items = orderData?.items || [];
+            const totalPay = Number(orderData?.totalPayment) || 0;
+            const baseTotal = items.reduce((s: number, it: any) => s + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+            const uniqueCode = totalPay - baseTotal;
+
+            docPdf.setFontSize(18); docPdf.text('BACANAU STORE', 14, 20);
+            docPdf.setFontSize(12); docPdf.text(`Invoice ID: ${orderIdLocal}`, 14, 28);
+            docPdf.setFontSize(10); docPdf.text(`Nama: ${buyerName}`, 14, 36);
+            docPdf.text(`Kontak: ${buyerContact}`, 14, 42);
+            docPdf.text(`Domisili: ${buyerDomicile}`, 14, 48);
+
+            const tableRows = items.map((it: any, idx: number) => [idx + 1, it.name, `Rp ${Number(it.price).toLocaleString('id-ID')}`, it.quantity, `Rp ${(Number(it.price) * Number(it.quantity)).toLocaleString('id-ID')}`]);
+            if (uniqueCode > 0) tableRows.push(['', 'Kode Unik Sistem', '-', '-', `Rp ${uniqueCode}`]);
+
+            autoTable(docPdf, {
+                startY: 60,
+                head: [['No', 'Item', 'Harga Satuan', 'Qty', 'Total']],
+                body: tableRows,
+                theme: 'striped',
+            });
+
+            const finalY = (docPdf as any).lastAutoTable ? (docPdf as any).lastAutoTable.finalY + 10 : 120;
+            docPdf.setFontSize(12); docPdf.text(`Total Bayar: Rp ${totalPay.toLocaleString('id-ID')}`, 14, finalY + 6);
+            docPdf.save(`Bacanau_Invoice_${orderIdLocal}.pdf`);
+            toast.success('Invoice berhasil diunduh');
+        } catch {
+            toast.error('Gagal membuat file PDF');
         }
     };
 
     // Auto-fetch jika ada ID di URL
     useEffect(() => {
         if (urlId) {
-            fetchOrder(urlId);
+            // schedule to avoid synchronous setState in effect
+            const t = setTimeout(() => fetchOrder(urlId), 0);
+            return () => clearTimeout(t);
         }
-    }, [urlId]);
+    }, [urlId, fetchOrder]);
+
+    // generate QRIS jika order ditemukan dan status menunggu
+    useEffect(() => {
+        if (orderData && orderData.status === 'Menunggu Pembayaran') {
+            const amount = Number(orderData.totalPayment) || 0;
+            if (amount > 0) {
+                const t = setTimeout(() => fetchDynamicQris(amount), 0);
+                return () => clearTimeout(t);
+            }
+        } else {
+            const t = setTimeout(() => setQrisImage(''), 0);
+            return () => clearTimeout(t);
+        }
+    }, [orderData]);
 
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
@@ -62,6 +202,7 @@ function TrackContent() {
 
     return (
         <div className="min-h-screen bg-slate-100 font-sans pb-24">
+            <Toaster position="top-center" />
             {/* HEADER */}
             <div className="bg-white px-4 py-4 sticky top-0 z-10 shadow-sm flex items-center gap-3">
                 <Link href="/" className="text-slate-600 hover:text-slate-900">
@@ -89,6 +230,24 @@ function TrackContent() {
                             </button>
                         </form>
                         {errorMsg && <p className="text-red-500 text-xs font-bold text-center mt-4 bg-red-50 p-2 rounded-lg">{errorMsg}</p>}
+                        {searchResults && (
+                            <div className="mt-4 bg-white border border-slate-100 rounded-xl p-4">
+                                <h3 className="font-bold mb-2">Hasil Pencarian ({searchResults.length})</h3>
+                                <div className="space-y-2">
+                                    {searchResults.map((r) => (
+                                        <div key={r.id} className="flex items-center justify-between p-3 border rounded-lg">
+                                            <div>
+                                                <p className="font-semibold text-sm">ID: {r.id}</p>
+                                                <p className="text-xs text-slate-500">{r.customerName || '-'} • Rp {Number(r.totalPayment || 0).toLocaleString('id-ID')}</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button onClick={() => { setOrderData(r); setSearchResults(null); }} className="text-sm bg-slate-900 text-white px-3 py-2 rounded-lg">Pilih</button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 ) : (
                     /* TAMPILAN RINCIAN PESANAN (STYLE SHOPEE) */
@@ -139,10 +298,10 @@ function TrackContent() {
                                     </div>
                                 )}
                                 <div></div> {/* Spacer */}
-                                <div className="text-right">
-                                    <p className="text-xl font-black text-slate-900">Rp {Number(orderData.totalPayment).toLocaleString('id-ID')}</p>
-                                    <p className="text-[10px] text-slate-400">Termasuk kode unik</p>
-                                </div>
+                                        <div className="text-right">
+                                            <p className="text-xl font-black text-slate-900">Rp {Number(orderData.totalPayment).toLocaleString('id-ID')}</p>
+                                            <p className="text-[10px] text-slate-400">Termasuk kode unik</p>
+                                        </div>
                             </div>
                         </div>
 
@@ -182,6 +341,32 @@ function TrackContent() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* QRIS SECTION (jika menunggu pembayaran) */}
+                        {orderData.status === 'Menunggu Pembayaran' && (
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                                <h2 className="font-bold text-slate-800 mb-4">Pembayaran QRIS</h2>
+                                <div className="flex flex-col items-center gap-4">
+                                    {isGeneratingQris ? (
+                                        <div className="w-40 h-40 bg-slate-100 rounded-lg animate-pulse flex items-center justify-center">Membuat QRIS...</div>
+                                    ) : qrisError ? (
+                                        <div className="text-sm text-red-500">Gagal memuat QRIS. Silakan coba lagi nanti.</div>
+                                    ) : qrisImage ? (
+                                        <>
+                                            <div className="bg-white p-2 rounded-lg border">
+                                                <Image src={qrisImage} alt="QRIS" width={160} height={160} unoptimized />
+                                            </div>
+                                            <div className="flex gap-2 w-full">
+                                                <button onClick={handleDownloadQris} className="flex-1 bg-white border border-slate-300 py-2 rounded-xl font-bold">Download QRIS</button>
+                                                <button onClick={handleDownloadInvoicePDF} className="flex-1 bg-slate-900 text-white py-2 rounded-xl font-bold">Download Invoice</button>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="text-sm text-slate-500">QRIS belum tersedia.</div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
 
                     </div>
                 )}
