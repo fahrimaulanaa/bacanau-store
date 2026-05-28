@@ -143,16 +143,16 @@ export default function Home() {
         </div>
       )}
 
-      <nav className="bg-white shadow-sm sticky top-0 z-50">
+      <nav className="glass-navbar sticky top-0 z-50 backdrop-blur-xl backdrop-saturate-150">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-black tracking-tighter text-slate-900">BACANAU 25 STORE</h1>
+          <h1 className="text-2xl font-black tracking-tighter text-slate-950 drop-shadow-sm">BACANAU 25 STORE</h1>
           
           <div className="flex items-center gap-3">
             {/* Tombol Search Buka Tab Baru */}
             <Link 
                 href="/track" 
                 rel="noopener noreferrer"
-                className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors flex items-center gap-2"
+                className="border border-white/60 bg-white/55 hover:bg-white/80 text-slate-700 px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm backdrop-blur-md flex items-center gap-2"
             >
                 <span>🔍</span> <span className="hidden sm:inline">Cari Pesanan</span>
             </Link>
@@ -160,7 +160,7 @@ export default function Home() {
             {/* Tombol Keranjang dengan Animasi */}
             <button 
                 onClick={() => setIsCartOpen(!isCartOpen)} 
-                className={`relative bg-slate-900 text-white px-4 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all duration-300 ${cartBump ? 'scale-110 bg-indigo-600 shadow-lg' : ''}`}
+                className={`relative hidden sm:flex bg-slate-950/90 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl text-sm font-bold items-center gap-2 transition-all duration-300 shadow-lg shadow-slate-900/20 backdrop-blur-md ${cartBump ? 'scale-110 bg-indigo-600 shadow-lg' : ''}`}
             >
                 <span>🛒</span> <span className="hidden sm:inline">Keranjang</span>
                 {totalItemsInCart > 0 && (
@@ -174,7 +174,7 @@ export default function Home() {
         </div>
       </nav>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-28 sm:pb-8">
         {loading ? (
           <div className="flex justify-center items-center h-64">
             <p className="text-gray-500 font-medium animate-pulse">Memuat produk dari database...</p>
@@ -200,6 +200,32 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      {totalItemsInCart > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 px-4 pb-4 sm:hidden">
+          <button
+            type="button"
+            onClick={() => setIsCartOpen(true)}
+            className={`w-full rounded-2xl bg-slate-950 px-4 py-3 text-white shadow-2xl shadow-slate-950/30 transition-all duration-300 ${cartBump ? 'scale-[1.03] bg-indigo-600' : ''}`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-lg">
+                  <span>ðŸ›’</span>
+                </div>
+                <div className="min-w-0 text-left">
+                  <p className="truncate text-sm font-black">{totalItemsInCart} item di keranjang</p>
+                  <p className="text-xs font-medium text-white/70">Cek pesanan sebelum checkout</p>
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-white/60">Subtotal</p>
+                <p className="text-sm font-black">Rp {subTotal.toLocaleString('id-ID')}</p>
+              </div>
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* Cart Sidebar */}
       {isCartOpen && (
