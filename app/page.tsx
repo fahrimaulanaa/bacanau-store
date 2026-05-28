@@ -143,7 +143,7 @@ export default function Home() {
         </div>
       )}
 
-      <nav className="glass-navbar sticky top-0 z-50 backdrop-blur-xl backdrop-saturate-150">
+      <nav className="glasshour-navbar sticky top-0 z-50 backdrop-blur-xl backdrop-saturate-150">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-black tracking-tighter text-slate-950 drop-shadow-sm">BACANAU 25 STORE</h1>
           

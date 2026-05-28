@@ -50,7 +50,7 @@ export default function CheckoutPage() {
     const handleSubmitOrder = async (e: React.FormEvent) => {
         e.preventDefault();
         if (cart.length === 0) return toast.error("Keranjang belanja kosong!");
-        if (!customerName || !customerEmail || !contactInfo || !domicile) return toast.error("Lengkapi semua form!");
+        if (!customerName || !contactInfo || !domicile) return toast.error("Lengkapi semua form!");
 
         setIsSubmitting(true);
         const loadingToast = toast.loading("Memproses pesanan...");
@@ -173,14 +173,13 @@ export default function CheckoutPage() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-700 mb-2">Email Aktif (Untuk Resi)</label>
+                                    <label className="block text-xs font-bold text-slate-700 mb-2">Email Aktif (Untuk Resi) <span className="text-slate-400 font-semibold">(Opsional)</span></label>
                                     <input 
                                         type="email" 
                                         className="w-full border border-slate-200 p-3.5 rounded-xl text-sm focus:ring-2 focus:ring-slate-900 outline-none transition-shadow" 
                                         placeholder="Contoh: bacanau@gmail.com" 
                                         value={customerEmail} 
                                         onChange={(e) => setCustomerEmail(e.target.value)} 
-                                        required 
                                     />
                                 </div>
                                 <div>

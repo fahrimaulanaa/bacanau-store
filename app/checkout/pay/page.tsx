@@ -397,6 +397,9 @@ function PayContent() {
                                         </>
                                     ) : null}
                                     <p className="text-[11px] text-slate-500 mt-3 font-medium">Nominal otomatis terisi saat di-scan</p>
+                                    <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[11px] font-semibold text-red-700 leading-relaxed text-center">
+                                        Setelah membayar, jangan lupa untuk unggah bukti bayar ya. Karena website kami belum berlangganan payment gateway buat automatisasi pembayaran kamu. Makasih atas pengertiannya
+                                    </div>
                                 </>
                             )}
 

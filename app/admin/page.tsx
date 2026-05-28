@@ -6,6 +6,10 @@ import { signInWithEmailAndPassword, signOut, onAuthStateChanged, User } from 'f
 import { db, auth } from '../../lib/firebase'; 
 import { supabase } from '../../lib/supabase';
 import imageCompression from 'browser-image-compression';
+import Link from 'next/link';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
     Bar,
     BarChart,
@@ -91,7 +95,9 @@ export default function AdminPage() {
     const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products'>('dashboard');
     const [orders, setOrders] = useState<Order[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
-    const [dataLoading, setDataLoading] = useState<boolean>(false);
+    const [hasOrdersSnapshot, setHasOrdersSnapshot] = useState<boolean>(false);
+    const [hasProductsSnapshot, setHasProductsSnapshot] = useState<boolean>(false);
+    const [liveError, setLiveError] = useState<boolean>(false);
 
     // Form States Tambah/Edit Produk
     const [prodName, setProdName] = useState<string>('');
@@ -126,9 +132,13 @@ export default function AdminPage() {
             if (!currentUser) {
                 setOrders([]);
                 setProducts([]);
-                setDataLoading(false);
+                setHasOrdersSnapshot(false);
+                setHasProductsSnapshot(false);
+                setLiveError(false);
             } else {
-                setDataLoading(true);
+                setHasOrdersSnapshot(false);
+                setHasProductsSnapshot(false);
+                setLiveError(false);
             }
             setAuthLoading(false);
         });
@@ -151,9 +161,10 @@ export default function AdminPage() {
                 const dateB = getCreatedAtDate(b.createdAt)?.getTime() || 0;
                 return dateB - dateA;
             }));
-            setDataLoading(false);
+            setHasOrdersSnapshot(true);
+            setLiveError(false);
         }, () => {
-            setDataLoading(false);
+            setLiveError(true);
         });
 
         // 2. Live Listener untuk Koleksi Products
@@ -169,8 +180,10 @@ export default function AdminPage() {
                 };
             }) as Product[];
             setProducts(prodList);
+            setHasProductsSnapshot(true);
+            setLiveError(false);
         }, () => {
-            setDataLoading(false);
+            setLiveError(true);
         });
 
         return () => {
@@ -319,7 +332,219 @@ Terima Kasih`;
         }
     };
 
-    const dashboardData = useMemo(() => {
+    const handleExportExcel = () => {
+        if (orders.length === 0 && products.length === 0) {
+            alert("Tidak ada data untuk diexport.");
+            return;
+        }
+
+        const exportDate = new Date();
+        const exportStamp = exportDate.toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        const exportLabel = exportDate.toLocaleString('id-ID');
+
+        const ordersRows = orders.map((order) => {
+            const createdAt = getCreatedAtDate(order.createdAt);
+            const items = order.items ?? [];
+            const itemCount = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+
+            return {
+                'Order ID': order.id,
+                'Nama Pelanggan': order.customerName,
+                'Kontak': order.contactInfo,
+                'Domisili': order.domicile,
+                'Status': order.status,
+                'Total Tagihan': Number(order.totalPayment) || 0,
+                'Jumlah Item': itemCount,
+                'Rincian Item': items.map((item) => `${item.name} (${item.quantity}x)`).join(', '),
+                'Bukti Transfer URL': order.paymentProofUrl || '',
+                'Tanggal Pesan': createdAt ? createdAt.toLocaleString('id-ID') : '',
+            };
+        });
+
+        const orderItemsRows = orders.flatMap((order) => {
+            const createdAt = getCreatedAtDate(order.createdAt);
+            return (order.items ?? []).map((item) => {
+                const quantity = Number(item.quantity) || 0;
+                const price = Number(item.price) || 0;
+
+                return {
+                    'Order ID': order.id,
+                    'Nama Pelanggan': order.customerName,
+                    'Status': order.status,
+                    'Tanggal Pesan': createdAt ? createdAt.toLocaleString('id-ID') : '',
+                    'Nama Item': item.name,
+                    'Qty': quantity,
+                    'Harga Satuan': price,
+                    'Subtotal': quantity * price,
+                };
+            });
+        });
+
+        const productRows = products.map((product) => ({
+            'Product ID': product.id,
+            'Nama Produk': product.name,
+            'Harga': product.price,
+            'Status Produk': (product.isActive ?? true) ? 'Aktif' : 'Suspend',
+            'URL Gambar': product.img,
+        }));
+
+        const summaryRows = [
+            { Label: 'Generated At', Value: exportLabel },
+            { Label: 'Total Pesanan', Value: dashboardData.totalOrders },
+            { Label: 'Total Produk', Value: dashboardData.totalProducts },
+            { Label: 'Produk Aktif', Value: dashboardData.activeProducts },
+            { Label: 'Produk Disuspend', Value: dashboardData.suspendedProducts },
+            { Label: 'Pesanan Menunggu Pembayaran', Value: dashboardData.pendingOrders },
+            { Label: 'Pesanan Mengecek Bukti', Value: dashboardData.reviewingOrders },
+            { Label: 'Pesanan Selesai', Value: dashboardData.completedOrders },
+            { Label: 'Pesanan Dibatalkan', Value: dashboardData.canceledOrders },
+            { Label: 'Pendapatan Kotor', Value: dashboardData.grossRevenue },
+            { Label: 'Pendapatan Selesai', Value: dashboardData.completedRevenue },
+            { Label: 'Rata-rata Transaksi', Value: dashboardData.averageOrderValue },
+        ];
+
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'Ringkasan');
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(ordersRows), 'Pesanan');
+        XLSX.utils.book_append_sheet(
+            workbook,
+            XLSX.utils.json_to_sheet(orderItemsRows.length ? orderItemsRows : [{ Catatan: 'Tidak ada item pesanan.' }]),
+            'Detail Item'
+        );
+        XLSX.utils.book_append_sheet(
+            workbook,
+            XLSX.utils.json_to_sheet(productRows.length ? productRows : [{ Catatan: 'Tidak ada produk.' }]),
+            'Produk'
+        );
+
+        XLSX.writeFile(workbook, `bacanau-admin-export-${exportStamp}.xlsx`);
+    };
+
+    const handleExportPdf = () => {
+        if (orders.length === 0 && products.length === 0) {
+            alert("Tidak ada data untuk diexport.");
+            return;
+        }
+
+        const exportDate = new Date();
+        const exportStamp = exportDate.toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        const exportLabel = exportDate.toLocaleString('id-ID');
+        const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+        const getNextTableY = (fallback: number) => {
+            const lastTable = (pdf as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable;
+            return (lastTable?.finalY ?? fallback) + 20;
+        };
+
+        pdf.setFontSize(16);
+        pdf.text('Bacanau Admin Export', 40, 40);
+        pdf.setFontSize(10);
+        pdf.setTextColor(100);
+        pdf.text(`Generated: ${exportLabel}`, 40, 58);
+        pdf.setTextColor(0);
+
+        const summaryRows = [
+            ['Generated At', exportLabel],
+            ['Total Pesanan', String(dashboardData.totalOrders)],
+            ['Total Produk', String(dashboardData.totalProducts)],
+            ['Produk Aktif', String(dashboardData.activeProducts)],
+            ['Produk Disuspend', String(dashboardData.suspendedProducts)],
+            ['Pesanan Menunggu Pembayaran', String(dashboardData.pendingOrders)],
+            ['Pesanan Mengecek Bukti', String(dashboardData.reviewingOrders)],
+            ['Pesanan Selesai', String(dashboardData.completedOrders)],
+            ['Pesanan Dibatalkan', String(dashboardData.canceledOrders)],
+            ['Pendapatan Kotor', formatCurrency(dashboardData.grossRevenue)],
+            ['Pendapatan Selesai', formatCurrency(dashboardData.completedRevenue)],
+            ['Rata-rata Transaksi', formatCurrency(dashboardData.averageOrderValue)],
+        ];
+
+        autoTable(pdf, {
+            startY: 80,
+            head: [['Ringkasan', 'Nilai']],
+            body: summaryRows,
+            theme: 'striped',
+            styles: { fontSize: 9 },
+            headStyles: { fillColor: [15, 23, 42] },
+        });
+
+        const ordersTable = orders.map((order) => {
+            const createdAt = getCreatedAtDate(order.createdAt);
+            return [
+                order.id,
+                order.customerName,
+                order.contactInfo,
+                order.domicile,
+                order.status,
+                formatCurrency(Number(order.totalPayment) || 0),
+                createdAt ? createdAt.toLocaleString('id-ID') : '',
+                order.paymentProofUrl ? 'Ada' : 'Tidak',
+            ];
+        });
+
+        autoTable(pdf, {
+            startY: getNextTableY(80),
+            head: [['Order ID', 'Pelanggan', 'Kontak', 'Domisili', 'Status', 'Total', 'Tanggal', 'Bukti']],
+            body: ordersTable.length ? ordersTable : [['-', 'Tidak ada pesanan', '-', '-', '-', '-', '-', '-']],
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [15, 23, 42] },
+            columnStyles: {
+                5: { halign: 'right' },
+            },
+        });
+
+        const itemsTable = orders.flatMap((order) => {
+            const createdAt = getCreatedAtDate(order.createdAt);
+            return (order.items ?? []).map((item) => {
+                const quantity = Number(item.quantity) || 0;
+                const price = Number(item.price) || 0;
+                return [
+                    order.id,
+                    order.customerName,
+                    order.status,
+                    createdAt ? createdAt.toLocaleString('id-ID') : '',
+                    item.name,
+                    String(quantity),
+                    formatCurrency(price),
+                    formatCurrency(price * quantity),
+                ];
+            });
+        });
+
+        autoTable(pdf, {
+            startY: getNextTableY(80),
+            head: [['Order ID', 'Pelanggan', 'Status', 'Tanggal', 'Item', 'Qty', 'Harga', 'Subtotal']],
+            body: itemsTable.length ? itemsTable : [['-', '-', '-', '-', 'Tidak ada item pesanan', '-', '-', '-']],
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [15, 23, 42] },
+            columnStyles: {
+                5: { halign: 'right' },
+                6: { halign: 'right' },
+                7: { halign: 'right' },
+            },
+        });
+
+        const productsTable = products.map((product) => [
+            product.id,
+            product.name,
+            formatCurrency(product.price),
+            (product.isActive ?? true) ? 'Aktif' : 'Suspend',
+            product.img,
+        ]);
+
+        autoTable(pdf, {
+            startY: getNextTableY(80),
+            head: [['Product ID', 'Nama Produk', 'Harga', 'Status', 'URL Gambar']],
+            body: productsTable.length ? productsTable : [['-', 'Tidak ada produk', '-', '-', '-']],
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [15, 23, 42] },
+            columnStyles: {
+                2: { halign: 'right' },
+            },
+        });
+
+        pdf.save(`bacanau-admin-export-${exportStamp}.pdf`);
+    };
+
+    const dashboardData = (() => {
         const totalOrders = orders.length;
         const totalProducts = products.length;
         const activeProducts = products.filter((product) => product.isActive ?? true).length;
@@ -414,7 +639,22 @@ Terima Kasih`;
             topItems,
             recentOrders,
         };
-    }, [orders, products]);
+    })();
+
+    const liveStatus = liveError
+        ? 'error'
+        : (hasOrdersSnapshot && hasProductsSnapshot ? 'connected' : 'connecting');
+    const liveStatusLabel = liveStatus === 'connected'
+        ? 'Live Connected'
+        : liveStatus === 'error'
+            ? 'Koneksi Bermasalah'
+            : 'Menghubungkan...';
+    const liveStatusColor = liveStatus === 'connected'
+        ? 'bg-emerald-500'
+        : liveStatus === 'error'
+            ? 'bg-red-500'
+            : 'bg-amber-500';
+    const canExport = orders.length > 0 || products.length > 0;
 
     if (authLoading) return <div className="min-h-screen bg-slate-900 flex justify-center items-center text-white"><p className="animate-pulse">Memverifikasi Admin...</p></div>;
 
@@ -439,7 +679,7 @@ Terima Kasih`;
 
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative">
-            <nav className="bg-white border-b border-slate-200 sticky top-0 z-30">
+            <nav className="glasshour-navbar sticky top-0 z-30">
                 <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
                     <div className="flex items-center gap-3">
                         <span className="bg-slate-900 text-white text-xs font-black px-2 py-1 rounded">PRO</span>
@@ -447,20 +687,51 @@ Terima Kasih`;
                     </div>
                     
                     <div className="flex items-center gap-2 sm:gap-4">
+                        <button
+                            type="button"
+                            onClick={handleExportExcel}
+                            disabled={!canExport}
+                            className={`text-xs font-bold px-3 py-2 rounded-xl border transition-colors inline-flex items-center gap-2 ${
+                                canExport
+                                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
+                                    : 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'
+                            }`}
+                        >
+                            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4">
+                                <path d="M4 3h11l5 5v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="currentColor" opacity="0.2" />
+                                <path d="M15 3v5h5" fill="currentColor" />
+                                <path
+                                    d="M7.3 17.4L9.9 14 7.3 10.6h1.9l1.4 2 1.4-2h1.9l-2.6 3.4 2.6 3.4h-1.9l-1.4-2-1.4 2H7.3z"
+                                    fill="currentColor"
+                                />
+                            </svg>
+                            Export to Excel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleExportPdf}
+                            disabled={!canExport}
+                            className={`text-xs font-bold px-3 py-2 rounded-xl border transition-colors inline-flex items-center gap-2 ${
+                                canExport
+                                    ? 'text-red-600 bg-red-50 border-red-200 hover:bg-red-100'
+                                    : 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'
+                            }`}
+                        >
+                            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4">
+                                <path d="M4 3h11l5 5v13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="currentColor" opacity="0.2" />
+                                <path d="M15 3v5h5" fill="currentColor" />
+                                <path
+                                    d="M7.2 16.9v-6h2.2c1.3 0 2.1.8 2.1 2 0 1.3-.9 2-2.2 2H8.9v2h-1.7Zm1.7-3.3h.7c.6 0 .9-.3.9-.8 0-.5-.3-.8-.9-.8h-.7v1.6Zm4.3 3.3v-6h1.9c2 0 3.1 1.1 3.1 3s-1.1 3-3.1 3h-1.9Zm1.7-1.4h.3c1 0 1.6-.5 1.6-1.6 0-1-.6-1.6-1.6-1.6h-.3v3.2Z"
+                                    fill="currentColor"
+                                />
+                            </svg>
+                            Export to PDF
+                        </button>
                         <span className="text-xs text-slate-500 font-medium hidden md:inline">Logged as: {user.email}</span>
                         
                         <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-xl border border-slate-200 flex items-center gap-1.5 select-none">
-                            {dataLoading ? (
-                                <>
-                                    <span className="animate-spin inline-block">🔄</span> 
-                                    <span>Sinkronisasi...</span>
-                                </>
-                            ) : (
-                                <>
-                                    <span>⚡</span> 
-                                    <span>Live Connected</span>
-                                </>
-                            )}
+                            <span className={`h-2 w-2 rounded-full ${liveStatusColor}`} />
+                            <span>{liveStatusLabel}</span>
                         </div>
 
                         <button 
@@ -469,6 +740,12 @@ Terima Kasih`;
                         >
                             Keluar
                         </button>
+                        <Link
+                            href="/"
+                            className="text-xs font-bold text-slate-700 bg-white/70 hover:bg-white/90 px-3 py-2 rounded-xl border border-white/60 transition-colors"
+                        >
+                            Home
+                        </Link>
                     </div>
                 </div>
             </nav>
