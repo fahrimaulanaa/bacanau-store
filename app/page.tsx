@@ -20,9 +20,25 @@ interface CartItem extends Product {
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    if (typeof window === 'undefined') {
+      return [];
+    }
+
+    const savedCart = localStorage.getItem('cart');
+    return savedCart ? JSON.parse(savedCart) : [];
+  });
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [cartBump, setCartBump] = useState<boolean>(false);
+  const [showPreorderNotification, setShowPreorderNotification] = useState<boolean>(true);
+
+  useEffect(() => {
+    const notificationTimer = setTimeout(() => {
+      setShowPreorderNotification(false);
+    }, 2000);
+
+    return () => clearTimeout(notificationTimer);
+  }, []);
 
   // 1. REAL-TIME LISTENER: Ambil produk dari Firestore secara Live
   useEffect(() => {
@@ -48,12 +64,6 @@ export default function Home() {
       console.error("Error fetching products: ", error);
       setLoading(false);
     });
-
-    // Load cart dari localStorage jika ada
-    const savedCart = localStorage.getItem('cart');
-    if (savedCart) {
-      setCart(JSON.parse(savedCart));
-    }
 
     // Bersihkan listener saat halaman ditutup
     return () => unsubscribe();
@@ -100,6 +110,36 @@ export default function Home() {
   
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
+      {showPreorderNotification && (
+        <div className="fixed left-4 right-4 top-4 z-[60] sm:left-auto sm:right-6 sm:w-full sm:max-w-md">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start gap-3 p-4 pr-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                <span className="text-lg font-black">!</span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-black uppercase tracking-wide text-slate-900">Info Pre-order</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Pre-order dibuka mulai tanggal <strong>29 Mei</strong> hingga <strong>02 Juni 2026</strong>.
+                  Pengambilan diperkirakan pada tanggal <strong>4 - 5 Juni 2026</strong>.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPreorderNotification(false)}
+                aria-label="Tutup notifikasi pre-order"
+                className="rounded-full px-2 py-1 text-2xl leading-none text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="h-1 bg-slate-100">
+              <div className="preorder-notification-progress h-full bg-amber-500" />
+            </div>
+          </div>
+        </div>
+      )}
+
       <nav className="bg-white shadow-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-black tracking-tighter text-slate-900">BACANAU 25 STORE</h1>

@@ -25,3 +25,18 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.preorder-notification-progress {
+  animation: preorder-notification-progress 2s linear forwards;
+  transform-origin: left;
+}
+
+@keyframes preorder-notification-progress {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}
