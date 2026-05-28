@@ -60,8 +60,7 @@ export default function Home() {
 
       setProducts(activeProducts);
       setLoading(false);
-    }, (error) => {
-      console.error("Error fetching products: ", error);
+    }, () => {
       setLoading(false);
     });
 
@@ -111,27 +110,31 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
       {showPreorderNotification && (
-        <div className="fixed left-4 right-4 top-4 z-[60] sm:left-auto sm:right-6 sm:w-full sm:max-w-md">
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-start gap-3 p-4 pr-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                <span className="text-lg font-black">!</span>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl">
+            <div className="p-6 sm:p-8">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                  <span className="text-2xl font-black">!</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPreorderNotification(false)}
+                  aria-label="Tutup notifikasi pre-order"
+                  className="rounded-full px-2 py-1 text-3xl leading-none text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900"
+                >
+                  &times;
+                </button>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-black uppercase tracking-wide text-slate-900">Info Pre-order</p>
-                <p className="mt-1 text-sm leading-6 text-slate-600">
-                  Pre-order dibuka mulai tanggal <strong>29 Mei</strong> hingga <strong>02 Juni 2026</strong>.
-                  Pengambilan diperkirakan pada tanggal <strong>4 - 5 Juni 2026</strong>.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPreorderNotification(false)}
-                aria-label="Tutup notifikasi pre-order"
-                className="rounded-full px-2 py-1 text-2xl leading-none text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900"
-              >
-                &times;
-              </button>
+
+              <p className="text-center text-sm font-black uppercase tracking-wide text-amber-600">Info Pre-order</p>
+              <h2 className="mt-2 text-center text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+                Pre-order Bacanau Store
+              </h2>
+              <p className="mt-4 text-center text-base leading-7 text-slate-600">
+                Pre-order dibuka mulai tanggal <strong>29 Mei</strong> hingga <strong>02 Juni 2026</strong>.
+                Pengambilan diperkirakan pada tanggal <strong>4 - 5 Juni 2026</strong>.
+              </p>
             </div>
             <div className="h-1 bg-slate-100">
               <div className="preorder-notification-progress h-full bg-amber-500" />

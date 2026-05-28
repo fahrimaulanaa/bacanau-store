@@ -18,8 +18,7 @@ export async function POST(request: Request) {
         
         // Kembalikan hasilnya ke frontend kita
         return NextResponse.json(data);
-    } catch (error) {
-        console.error("API Proxy Error:", error);
+    } catch {
         return NextResponse.json(
             { status: "error", message: "Gagal menghubungi server QRIS dari backend" }, 
             { status: 500 }

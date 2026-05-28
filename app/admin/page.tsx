@@ -123,8 +123,7 @@ export default function AdminPage() {
             })) as Order[];
             setOrders(orderList.sort((a, b) => b.createdAt?.seconds - a.createdAt?.seconds));
             setDataLoading(false);
-        }, (err) => {
-            console.error("Gagal memuat data orders:", err);
+        }, () => {
             setDataLoading(false);
         });
 
@@ -141,8 +140,8 @@ export default function AdminPage() {
                 };
             }) as Product[];
             setProducts(prodList);
-        }, (err) => {
-            console.error("Gagal memuat data products:", err);
+        }, () => {
+            setDataLoading(false);
         });
 
         return () => {
@@ -156,7 +155,7 @@ export default function AdminPage() {
         setLoginError('');
         try {
             await signInWithEmailAndPassword(auth, email, password);
-        } catch (err: any) {
+        } catch {
             setLoginError("Email atau Password Admin salah!");
         }
     };
@@ -170,7 +169,7 @@ export default function AdminPage() {
         try {
             const orderRef = doc(db, "orders", orderId);
             await updateDoc(orderRef, { status: newStatus });
-        } catch (err) {
+        } catch {
             alert("Gagal merubah status pesanan.");
         }
     };
@@ -180,7 +179,7 @@ export default function AdminPage() {
         if (!confirm("Apakah Anda yakin ingin menghapus pesanan ini secara permanen?")) return;
         try {
             await deleteDoc(doc(db, "orders", orderId));
-        } catch (err) {
+        } catch {
             alert("Gagal menghapus pesanan.");
         }
     };
@@ -232,7 +231,7 @@ Terima Kasih`;
                 alert("Produk baru berhasil ditambahkan!");
             }
             setProdName(''); setProdPrice(''); setProdImg(''); setEditingProductId(null);
-        } catch (err) {
+        } catch {
             alert("Gagal menyimpan data produk.");
         }
     };
@@ -242,7 +241,7 @@ Terima Kasih`;
         try {
             const productRef = doc(db, "products", productId);
             await updateDoc(productRef, { isActive: !currentStatus });
-        } catch (err) {
+        } catch {
             alert("Gagal mengubah status suspend produk.");
         }
     };
@@ -259,7 +258,7 @@ Terima Kasih`;
         if (!confirm("Apakah Anda yakin ingin menghapus produk ini dari katalog?")) return;
         try {
             await deleteDoc(doc(db, "products", productId));
-        } catch (err) {
+        } catch {
             alert("Gagal menghapus produk.");
         }
     };
