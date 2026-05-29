@@ -9,9 +9,10 @@ export async function GET(request: Request) {
     }
 
     const db = adminDb();
-    const [ordersSnapshot, productsSnapshot] = await Promise.all([
+    const [ordersSnapshot, productsSnapshot, vouchersSnapshot] = await Promise.all([
       db.collection('orders').get(),
       db.collection('products').get(),
+      db.collection('vouchers').get(),
     ]);
 
     const orders = ordersSnapshot.docs.map((doc) => ({
@@ -24,7 +25,12 @@ export async function GET(request: Request) {
       ...serializeFirestoreValue(doc.data()) as Record<string, unknown>,
     }));
 
-    return NextResponse.json({ orders, products });
+    const vouchers = vouchersSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...serializeFirestoreValue(doc.data()) as Record<string, unknown>,
+    }));
+
+    return NextResponse.json({ orders, products, vouchers });
   } catch {
     return NextResponse.json({ message: 'Gagal mengambil data admin.' }, { status: 500 });
   }

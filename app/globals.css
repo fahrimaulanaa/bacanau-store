@@ -35,18 +35,3 @@ body {
   backdrop-filter: blur(18px) saturate(170%);
   -webkit-backdrop-filter: blur(18px) saturate(170%);
 }
-
-.preorder-notification-progress {
-  animation: preorder-notification-progress 2s linear forwards;
-  transform-origin: left;
-}
-
-@keyframes preorder-notification-progress {
-  from {
-    transform: scaleX(1);
-  }
-
-  to {
-    transform: scaleX(0);
-  }
-}

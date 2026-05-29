@@ -133,8 +133,15 @@ function TrackContent() {
             const buyerDomicile = orderData?.domicile || '-';
             const items = orderData?.items || [];
             const totalPay = Number(orderData?.totalPayment) || 0;
-            const baseTotal = items.reduce((s: number, it: any) => s + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
-            const uniqueCode = totalPay - baseTotal;
+            const calculatedBaseTotal = items.reduce((s: number, it: any) => s + (Number(it.price) || 0) * (Number(it.quantity) || 1), 0);
+            const storedBasePayment = Number(orderData?.basePayment);
+            const baseTotal = Number.isFinite(storedBasePayment) && storedBasePayment > 0 ? storedBasePayment : calculatedBaseTotal;
+            const voucherAmount = Number(orderData?.voucherAmount) || 0;
+            const voucherCode = orderData?.voucherCode || '';
+            const storedUniqueCode = Number(orderData?.uniqueCode);
+            const uniqueCode = Number.isFinite(storedUniqueCode) && storedUniqueCode > 0
+                ? storedUniqueCode
+                : totalPay - baseTotal + voucherAmount;
 
             docPdf.setFontSize(18); docPdf.text('BACANAU STORE', 14, 20);
             docPdf.setFontSize(12); docPdf.text(`Invoice ID: ${orderIdLocal}`, 14, 28);
@@ -143,6 +150,9 @@ function TrackContent() {
             docPdf.text(`Domisili: ${buyerDomicile}`, 14, 48);
 
             const tableRows = items.map((it: any, idx: number) => [idx + 1, it.name, `Rp ${Number(it.price).toLocaleString('id-ID')}`, it.quantity, `Rp ${(Number(it.price) * Number(it.quantity)).toLocaleString('id-ID')}`]);
+            if (voucherAmount > 0) {
+                tableRows.push(['', `Voucher ${voucherCode ? `(${voucherCode})` : ''}`, '-', '-', `- Rp ${voucherAmount.toLocaleString('id-ID')}`]);
+            }
             if (uniqueCode > 0) tableRows.push(['', 'Kode Unik Sistem', '-', '-', `Rp ${uniqueCode}`]);
 
             autoTable(docPdf, {
@@ -199,6 +209,16 @@ function TrackContent() {
         const date = new Date(timestamp.seconds * 1000);
         return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB';
     };
+
+    const resolvedBasePayment = orderData
+        ? (() => {
+            const storedBase = Number(orderData.basePayment);
+            if (Number.isFinite(storedBase) && storedBase > 0) {
+                return storedBase;
+            }
+            return (orderData.items || []).reduce((sum: number, item: any) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 1), 0);
+        })()
+        : 0;
 
     return (
         <div className="min-h-screen bg-slate-100 font-sans pb-24">
@@ -280,8 +300,14 @@ function TrackContent() {
                             <div className="space-y-2">
                                 <div className="flex justify-between text-sm">
                                     <span className="text-slate-500">Subtotal Pesanan</span>
-                                    <span className="text-slate-800 font-medium">Rp {Number(orderData.basePayment || 0).toLocaleString('id-ID')}</span>
+                                    <span className="text-slate-800 font-medium">Rp {resolvedBasePayment.toLocaleString('id-ID')}</span>
                                 </div>
+                                {Number(orderData.voucherAmount || 0) > 0 && (
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-slate-500">Voucher {orderData.voucherCode ? `(${orderData.voucherCode})` : ''}</span>
+                                        <span className="text-amber-600 font-medium">- Rp {Number(orderData.voucherAmount || 0).toLocaleString('id-ID')}</span>
+                                    </div>
+                                )}
                                 <div className="flex justify-between text-sm">
                                     <span className="text-slate-500">Kode Unik Sistem</span>
                                     <span className="text-emerald-600 font-medium">+ Rp {orderData.uniqueCode || 0}</span>

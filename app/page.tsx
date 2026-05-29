@@ -32,14 +32,6 @@ export default function Home() {
   const [cartBump, setCartBump] = useState<boolean>(false);
   const [showPreorderNotification, setShowPreorderNotification] = useState<boolean>(true);
 
-  useEffect(() => {
-    const notificationTimer = setTimeout(() => {
-      setShowPreorderNotification(false);
-    }, 2000);
-
-    return () => clearTimeout(notificationTimer);
-  }, []);
-
   // 1. REAL-TIME LISTENER: Ambil produk dari Firestore secara Live
   useEffect(() => {
     // onSnapshot akan terus memantau perubahan data (seperti saat admin klik suspend)
@@ -132,12 +124,19 @@ export default function Home() {
                 Pre-order Bacanau Store
               </h2>
               <p className="mt-4 text-center text-base leading-7 text-slate-600">
-                Pre-order dibuka mulai tanggal <strong>29 Mei</strong> hingga <strong>02 Juni 2026</strong>.
-                Pengambilan diperkirakan pada tanggal <strong>4 - 5 Juni 2026</strong>.
+                Pre-order dibuka mulai tanggal <strong>29 Mei</strong> hingga <strong>02 Juni 2026</strong>. Pengiriman pesanan
+                ke vendor dimulai <strong>2 Juni 2026 pukul 13:00 WIB</strong>.
+                Pengambilan atau pengiriman diperkirakan pada tanggal <strong>4 - 5 Juni 2026</strong>.
               </p>
             </div>
-            <div className="h-1 bg-slate-100">
-              <div className="preorder-notification-progress h-full bg-amber-500" />
+            <div className="border-t border-slate-100 p-6 sm:p-8">
+              <button
+                type="button"
+                onClick={() => setShowPreorderNotification(false)}
+                className="w-full rounded-xl bg-amber-500 px-4 py-3 text-sm font-black uppercase tracking-wide text-white transition-colors hover:bg-amber-600"
+              >
+                Mengerti
+              </button>
             </div>
           </div>
         </div>

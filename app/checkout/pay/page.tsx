@@ -27,6 +27,8 @@ function PayContent() {
     const [totalPay, setTotalPay] = useState<number>(0);
     const [baseTotal, setBaseTotal] = useState<number>(0);
     const [uniqueCode, setUniqueCode] = useState<number>(0);
+    const [voucherCode, setVoucherCode] = useState<string>('');
+    const [voucherAmount, setVoucherAmount] = useState<number>(0);
     const [paymentMethod, setPaymentMethod] = useState<string>('QRIS'); // State untuk metode pembayaran
     
     const [buyerName, setBuyerName] = useState<string>('');
@@ -91,11 +93,22 @@ function PayContent() {
                     const orderData = await response.json();
                     const paymentAmount = Number(orderData.totalPayment) || 0;
                     const itemsArr = (orderData.items || []) as OrderItem[];
-                    
                     const calculatedBaseTotal = itemsArr.reduce((sum: number, item) => sum + (item.price * item.quantity), 0);
+                    const storedBasePayment = Number(orderData.basePayment);
+                    const resolvedBaseTotal = Number.isFinite(storedBasePayment) && storedBasePayment > 0
+                        ? storedBasePayment
+                        : calculatedBaseTotal;
+                    const storedVoucherAmount = Number(orderData.voucherAmount) || 0;
+                    const storedUniqueCode = Number(orderData.uniqueCode);
+                    const resolvedUniqueCode = Number.isFinite(storedUniqueCode) && storedUniqueCode > 0
+                        ? storedUniqueCode
+                        : paymentAmount - resolvedBaseTotal + storedVoucherAmount;
+
                     setTotalPay(paymentAmount);
-                    setBaseTotal(calculatedBaseTotal);
-                    setUniqueCode(paymentAmount - calculatedBaseTotal);
+                    setBaseTotal(resolvedBaseTotal);
+                    setUniqueCode(resolvedUniqueCode);
+                    setVoucherCode(orderData.voucherCode || '');
+                    setVoucherAmount(storedVoucherAmount);
                     
                     setBuyerName(orderData.customerName || 'Pelanggan');
                     setBuyerContact(orderData.contactInfo || '-');
@@ -163,6 +176,10 @@ function PayContent() {
             const tableRows = orderItems.map((item, index) => [
                 index + 1, item.name, `Rp ${Number(item.price).toLocaleString('id-ID')}`, item.quantity, `Rp ${(Number(item.price) * Number(item.quantity)).toLocaleString('id-ID')}`
             ]);
+
+            if (voucherAmount > 0) {
+                tableRows.push(['', `Voucher ${voucherCode ? `(${voucherCode})` : ''}`, '-', '-', `- Rp ${voucherAmount.toLocaleString('id-ID')}`]);
+            }
 
             if (uniqueCode > 0) {
                 tableRows.push(['', 'Kode Unik Sistem', '-', '-', `Rp ${uniqueCode}`]);
@@ -337,6 +354,12 @@ function PayContent() {
                                 <span className="text-emerald-800 font-medium">Total Belanja:</span>
                                 <span className="font-bold text-slate-700">Rp {baseTotal.toLocaleString('id-ID')}</span>
                             </div>
+                            {voucherAmount > 0 && (
+                                <div className="flex justify-between items-center text-sm mb-1.5">
+                                    <span className="text-emerald-800 font-medium">Voucher {voucherCode ? `(${voucherCode})` : ''}:</span>
+                                    <span className="font-bold text-amber-600">- Rp {voucherAmount.toLocaleString('id-ID')}</span>
+                                </div>
+                            )}
                             <div className="flex justify-between items-center text-sm mb-3">
                                 <span className="text-emerald-800 font-medium">Kode Unik:</span>
                                 <span className="font-bold text-emerald-600">+ Rp {uniqueCode}</span>

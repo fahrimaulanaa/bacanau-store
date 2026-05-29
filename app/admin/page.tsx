@@ -34,6 +34,10 @@ interface Order {
     contactInfo: string;
     domicile: string;
     totalPayment: number;
+    basePayment?: number;
+    uniqueCode?: number;
+    voucherCode?: string;
+    voucherAmount?: number;
     status: string;
     paymentProofUrl?: string;
     items: OrderItem[];
@@ -46,6 +50,14 @@ interface Product {
     price: number;
     img: string;
     isActive?: boolean; // Properti untuk status aktif/suspend produk
+}
+
+interface Voucher {
+    id: string;
+    code: string;
+    amount: number;
+    isActive?: boolean;
+    createdAt?: unknown;
 }
 
 const DASHBOARD_COLORS = ['#0f172a', '#ef4444', '#3b82f6', '#10b981', '#f59e0b'];
@@ -90,12 +102,14 @@ export default function AdminPage() {
     const [loginError, setLoginError] = useState<string>('');
 
     // Dashboard States
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products'>('dashboard');
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products' | 'vouchers'>('dashboard');
     const [isAdminMenuOpen, setIsAdminMenuOpen] = useState<boolean>(false);
     const [orders, setOrders] = useState<Order[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
+    const [vouchers, setVouchers] = useState<Voucher[]>([]);
     const [hasOrdersSnapshot, setHasOrdersSnapshot] = useState<boolean>(false);
     const [hasProductsSnapshot, setHasProductsSnapshot] = useState<boolean>(false);
+    const [hasVouchersSnapshot, setHasVouchersSnapshot] = useState<boolean>(false);
     const [liveError, setLiveError] = useState<boolean>(false);
 
     // Form States Tambah/Edit Produk
@@ -105,6 +119,12 @@ export default function AdminPage() {
     const [prodImageFile, setProdImageFile] = useState<File | null>(null);
     const [savingProduct, setSavingProduct] = useState<boolean>(false);
     const [editingProductId, setEditingProductId] = useState<string | null>(null);
+
+    // Form States Voucher
+    const [voucherCode, setVoucherCode] = useState<string>('');
+    const [voucherAmount, setVoucherAmount] = useState<string>('');
+    const [savingVoucher, setSavingVoucher] = useState<boolean>(false);
+    const [editingVoucherId, setEditingVoucherId] = useState<string | null>(null);
 
     // State Modal Bukti Pembayaran
     const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null);
@@ -140,6 +160,7 @@ export default function AdminPage() {
 
         setHasOrdersSnapshot(false);
         setHasProductsSnapshot(false);
+        setHasVouchersSnapshot(false);
         setLiveError(false);
 
         try {
@@ -155,6 +176,7 @@ export default function AdminPage() {
             const data = await response.json();
             const orderList = (data.orders || []) as Order[];
             const productList = (data.products || []) as Product[];
+            const voucherList = (data.vouchers || []) as Voucher[];
 
             setOrders(orderList.sort((a, b) => {
                 const dateA = getCreatedAtDate(a.createdAt)?.getTime() || 0;
@@ -166,8 +188,15 @@ export default function AdminPage() {
                 price: Number(product.price) || 0,
                 isActive: product.isActive !== undefined ? product.isActive : true,
             })));
+            setVouchers(voucherList.map((voucher) => ({
+                ...voucher,
+                code: (voucher.code || voucher.id || '').toString().toUpperCase(),
+                amount: Number(voucher.amount) || 0,
+                isActive: voucher.isActive !== undefined ? voucher.isActive : true,
+            })));
             setHasOrdersSnapshot(true);
             setHasProductsSnapshot(true);
+            setHasVouchersSnapshot(true);
         } catch {
             setLiveError(true);
         }
@@ -180,12 +209,15 @@ export default function AdminPage() {
             if (!currentUser) {
                 setOrders([]);
                 setProducts([]);
+                setVouchers([]);
                 setHasOrdersSnapshot(false);
                 setHasProductsSnapshot(false);
+                setHasVouchersSnapshot(false);
                 setLiveError(false);
             } else {
                 setHasOrdersSnapshot(false);
                 setHasProductsSnapshot(false);
+                setHasVouchersSnapshot(false);
                 setLiveError(false);
                 setTimeout(() => {
                     void fetchAdminData();
@@ -357,7 +389,90 @@ Terima Kasih`;
         }
     };
 
-    const handleSelectAdminTab = (tab: 'dashboard' | 'orders' | 'products') => {
+    // FUNGSI VOUCHER: Save, Edit, Delete
+    const handleSaveVoucher = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const normalizedCode = voucherCode.trim().toUpperCase();
+        const parsedAmount = Number(voucherAmount.replace(/[^0-9]/g, ''));
+
+        if (!normalizedCode || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+            alert("Kode dan nominal voucher wajib diisi.");
+            return;
+        }
+
+        setSavingVoucher(true);
+        try {
+            const response = await fetch(
+                editingVoucherId
+                    ? `/api/admin/vouchers/${encodeURIComponent(editingVoucherId)}`
+                    : '/api/admin/vouchers',
+                {
+                    method: editingVoucherId ? 'PATCH' : 'POST',
+                    headers: {
+                        ...(await getAdminHeaders()),
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(editingVoucherId ? { amount: parsedAmount } : { code: normalizedCode, amount: parsedAmount }),
+                }
+            );
+
+            if (!response.ok) throw new Error('VOUCHER_SAVE_FAILED');
+            alert(editingVoucherId ? "Voucher berhasil diperbarui!" : "Voucher baru berhasil ditambahkan!");
+            setVoucherCode(''); setVoucherAmount(''); setEditingVoucherId(null);
+            await fetchAdminData();
+        } catch {
+            alert("Gagal menyimpan voucher.");
+        } finally {
+            setSavingVoucher(false);
+        }
+    };
+
+    const handleStartVoucherEdit = (voucher: Voucher) => {
+        setEditingVoucherId(voucher.id);
+        setVoucherCode(voucher.code);
+        setVoucherAmount(voucher.amount.toString());
+    };
+
+    const handleCancelVoucherEdit = () => {
+        setEditingVoucherId(null);
+        setVoucherCode('');
+        setVoucherAmount('');
+    };
+
+    const handleToggleVoucher = async (voucherId: string, currentStatus: boolean) => {
+        try {
+            const response = await fetch(`/api/admin/vouchers/${encodeURIComponent(voucherId)}`, {
+                method: 'PATCH',
+                headers: {
+                    ...(await getAdminHeaders()),
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ isActive: !currentStatus }),
+            });
+
+            if (!response.ok) throw new Error('VOUCHER_TOGGLE_FAILED');
+            await fetchAdminData();
+        } catch {
+            alert("Gagal mengubah status voucher.");
+        }
+    };
+
+    const handleDeleteVoucher = async (voucherId: string) => {
+        if (!confirm("Apakah Anda yakin ingin menghapus voucher ini?")) return;
+        try {
+            const response = await fetch(`/api/admin/vouchers/${encodeURIComponent(voucherId)}`, {
+                method: 'DELETE',
+                headers: await getAdminHeaders(),
+            });
+
+            if (!response.ok) throw new Error('VOUCHER_DELETE_FAILED');
+            await fetchAdminData();
+        } catch {
+            alert("Gagal menghapus voucher.");
+        }
+    };
+
+    const handleSelectAdminTab = (tab: 'dashboard' | 'orders' | 'products' | 'vouchers') => {
         setActiveTab(tab);
         setIsAdminMenuOpen(false);
     };
@@ -673,7 +788,7 @@ Terima Kasih`;
 
     const liveStatus = liveError
         ? 'error'
-        : (hasOrdersSnapshot && hasProductsSnapshot ? 'connected' : 'connecting');
+        : (hasOrdersSnapshot && hasProductsSnapshot && hasVouchersSnapshot ? 'connected' : 'connecting');
     const liveStatusLabel = liveStatus === 'connected'
         ? 'Live Connected'
         : liveStatus === 'error'
@@ -811,6 +926,9 @@ Terima Kasih`;
                             <button onClick={() => handleSelectAdminTab('products')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'products' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
                                 Kelola Katalog Produk ({products.length})
                             </button>
+                            <button onClick={() => handleSelectAdminTab('vouchers')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'vouchers' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                                Kelola Voucher ({vouchers.length})
+                            </button>
                         </div>
                         <div className="mt-4 grid grid-cols-2 gap-2">
                             <button type="button" onClick={() => { handleExportExcel(); setIsAdminMenuOpen(false); }} disabled={!canExport} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs font-bold text-emerald-700 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">
@@ -840,6 +958,9 @@ Terima Kasih`;
                     </button>
                     <button onClick={() => handleSelectAdminTab('products')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'products' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         👕 Kelola Katalog Produk ({products.length})
+                    </button>
+                    <button onClick={() => handleSelectAdminTab('vouchers')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'vouchers' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                        🎟️ Kelola Voucher ({vouchers.length})
                     </button>
                 </div>
 
@@ -1050,6 +1171,11 @@ Terima Kasih`;
                                                         </span>
                                                     ))}
                                                 </div>
+                                                {Number(order.voucherAmount || 0) > 0 && (
+                                                    <div className="mt-3 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                                                        Voucher {order.voucherCode ? `(${order.voucherCode})` : ''}: - Rp {Number(order.voucherAmount || 0).toLocaleString('id-ID')}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
 
@@ -1185,6 +1311,100 @@ Terima Kasih`;
                                                     <button onClick={() => handleStartEdit(prod)} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">Edit</button>
                                                     <button onClick={() => handleDeleteProduct(prod.id)} className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg border border-red-100">Hapus</button>
                                                 </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* TAB 3: KELOLA VOUCHER */}
+                {activeTab === 'vouchers' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
+                            <h2 className="text-lg font-bold text-slate-900 mb-4">{editingVoucherId ? "📝 Edit Voucher" : "🎟️ Tambah Voucher Baru"}</h2>
+                            <form onSubmit={handleSaveVoucher} className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-2">Kode Voucher</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Contoh: BACANAU10"
+                                        className="w-full border p-3 rounded-xl text-sm uppercase"
+                                        value={voucherCode}
+                                        onChange={(e) => setVoucherCode(e.target.value)}
+                                        required
+                                        disabled={Boolean(editingVoucherId)}
+                                    />
+                                    {editingVoucherId && (
+                                        <p className="text-[11px] text-slate-400 mt-2">Kode voucher tidak dapat diubah. Hapus dan buat ulang jika perlu.</p>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-2">Nominal Potongan (Rupiah)</label>
+                                    <input
+                                        type="number"
+                                        placeholder="5000"
+                                        className="w-full border p-3 rounded-xl text-sm"
+                                        value={voucherAmount}
+                                        onChange={(e) => setVoucherAmount(e.target.value)}
+                                        required
+                                    />
+                                </div>
+                                <div className="space-y-2 pt-2">
+                                    <button type="submit" disabled={savingVoucher} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold disabled:bg-slate-400">
+                                        {savingVoucher ? "Menyimpan..." : editingVoucherId ? "Simpan Perubahan" : "Terbitkan Voucher"}
+                                    </button>
+                                    {editingVoucherId && (
+                                        <button type="button" onClick={handleCancelVoucherEdit} className="w-full bg-slate-100 text-slate-700 py-2 rounded-xl font-medium text-xs">
+                                            Batalkan Edit
+                                        </button>
+                                    )}
+                                </div>
+                            </form>
+                        </div>
+                        <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <h2 className="text-lg font-bold text-slate-900 mb-4">Voucher Aktif saat ini</h2>
+                            <div className="space-y-3">
+                                {vouchers.length === 0 ? (
+                                    <div className="text-sm text-slate-400 bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
+                                        Belum ada voucher terdaftar di database.
+                                    </div>
+                                ) : (
+                                    vouchers.map((voucher) => (
+                                        <div key={voucher.id} className={`flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-xl border transition-all ${voucher.isActive ? 'border-slate-100 bg-white' : 'border-red-100 bg-red-50/20'}`}>
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <p className="font-black text-slate-900 tracking-wide">{voucher.code}</p>
+                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${voucher.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+                                                        {voucher.isActive ? 'AKTIF' : 'NONAKTIF'}
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-slate-500 mt-1">Potongan: <span className="font-bold text-slate-700">Rp {voucher.amount.toLocaleString('id-ID')}</span></p>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleToggleVoucher(voucher.id, voucher.isActive ?? true)}
+                                                    className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-colors ${voucher.isActive ? 'text-amber-600 bg-amber-50 border-amber-200 hover:bg-amber-100' : 'text-emerald-600 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`}
+                                                >
+                                                    {voucher.isActive ? '⏸️ Nonaktifkan' : '▶️ Aktifkan'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleStartVoucherEdit(voucher)}
+                                                    className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100"
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteVoucher(voucher.id)}
+                                                    className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg border border-red-100"
+                                                >
+                                                    Hapus
+                                                </button>
                                             </div>
                                         </div>
                                     ))

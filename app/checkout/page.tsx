@@ -30,6 +30,9 @@ export default function CheckoutPage() {
     const [paymentMethod, setPaymentMethod] = useState('QRIS');
     
     const [uniqueCode, setUniqueCode] = useState<number>(0);
+    const [voucherCode, setVoucherCode] = useState<string>('');
+    const [appliedVoucher, setAppliedVoucher] = useState<{ code: string; amount: number } | null>(null);
+    const [isApplyingVoucher, setIsApplyingVoucher] = useState<boolean>(false);
 
     useEffect(() => {
         setMounted(true);
@@ -45,7 +48,50 @@ export default function CheckoutPage() {
     };
 
     const baseTotal = cart.reduce((sum, item) => sum + (parsePrice(item.price) * (Number(item.quantity) || 1)), 0);
-    const totalPay = baseTotal + uniqueCode;
+    const voucherDiscount = Math.min(appliedVoucher?.amount ?? 0, baseTotal);
+    const totalPay = Math.max(baseTotal - voucherDiscount, 0) + uniqueCode;
+
+    const handleApplyVoucher = async () => {
+        const normalizedCode = voucherCode.trim().toUpperCase();
+        if (!normalizedCode) {
+            toast.error("Masukkan kode voucher terlebih dahulu.");
+            return;
+        }
+
+        setIsApplyingVoucher(true);
+        const loadingToast = toast.loading("Memeriksa voucher...");
+
+        try {
+            const response = await fetch('/api/vouchers/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: normalizedCode }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => null);
+                throw new Error(errorData?.message || 'Voucher tidak valid.');
+            }
+
+            const data = await response.json();
+            const amount = Number(data.amount) || 0;
+            if (!Number.isFinite(amount) || amount <= 0) {
+                throw new Error('Voucher tidak valid.');
+            }
+
+            setAppliedVoucher({ code: data.code || normalizedCode, amount });
+            toast.success(`Voucher diterapkan: -Rp ${Math.min(amount, baseTotal).toLocaleString('id-ID')}`, { id: loadingToast });
+        } catch (error) {
+            setAppliedVoucher(null);
+            toast.error(error instanceof Error ? error.message : "Voucher tidak valid.", { id: loadingToast });
+        } finally {
+            setIsApplyingVoucher(false);
+        }
+    };
+
+    const handleRemoveVoucher = () => {
+        setAppliedVoucher(null);
+    };
 
     const handleSubmitOrder = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -65,6 +111,8 @@ export default function CheckoutPage() {
                 items: cart,
                 basePayment: baseTotal, 
                 uniqueCode, 
+                voucherCode: appliedVoucher?.code || '',
+                voucherAmount: voucherDiscount,
                 totalPayment: totalPay,
                 status: "Menunggu Pembayaran", 
                 createdAt: serverTimestamp()
@@ -108,7 +156,42 @@ export default function CheckoutPage() {
                             )}
                             <div className="space-y-2 mb-4">
                                 <div className="flex justify-between text-sm"><span className="text-slate-500">Subtotal:</span><span className="font-bold text-slate-700">Rp {baseTotal.toLocaleString('id-ID')}</span></div>
+                                {voucherDiscount > 0 && (
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-slate-500">Voucher {appliedVoucher?.code ? `(${appliedVoucher.code})` : ''}:</span>
+                                        <span className="font-bold text-amber-600">- Rp {voucherDiscount.toLocaleString('id-ID')}</span>
+                                    </div>
+                                )}
                                 <div className="flex justify-between text-sm"><span className="text-slate-500">Kode Unik:</span><span className="font-bold text-emerald-600">+ Rp {uniqueCode}</span></div>
+                            </div>
+                            <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 mb-4">
+                                <label className="block text-xs font-bold text-slate-700 mb-2">Kode Voucher <span className="text-slate-400 font-semibold">(Jika ada)</span></label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        className="flex-1 border border-slate-200 p-2.5 rounded-xl text-sm focus:ring-2 focus:ring-slate-900 outline-none uppercase"
+                                        placeholder="Contoh: BACANAU10"
+                                        value={voucherCode}
+                                        onChange={(e) => setVoucherCode(e.target.value)}
+                                        disabled={isApplyingVoucher}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={handleApplyVoucher}
+                                        disabled={isApplyingVoucher}
+                                        className="bg-slate-900 text-white px-4 rounded-xl text-xs font-bold uppercase disabled:bg-slate-400"
+                                    >
+                                        {isApplyingVoucher ? 'Cek...' : 'Terapkan'}
+                                    </button>
+                                </div>
+                                {appliedVoucher && (
+                                    <div className="mt-3 flex items-center justify-between text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-xl px-3 py-2">
+                                        <span>Voucher aktif: <strong>{appliedVoucher.code}</strong></span>
+                                        <button type="button" onClick={handleRemoveVoucher} className="text-[10px] font-bold uppercase text-amber-700 hover:text-amber-900">
+                                            Hapus
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                             <div className="flex justify-between items-center pt-4 border-t"><span className="font-bold text-slate-800">Total Akhir</span><span className="text-2xl font-black text-slate-900">Rp {totalPay.toLocaleString('id-ID')}</span></div>
                         </div>
