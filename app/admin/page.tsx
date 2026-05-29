@@ -157,12 +157,14 @@ export default function AdminPage() {
         };
     }, []);
 
-    const fetchAdminData = useCallback(async () => {
+    const fetchAdminData = useCallback(async (options: { silent?: boolean } = {}) => {
         if (!auth.currentUser) return;
 
-        setHasOrdersSnapshot(false);
-        setHasProductsSnapshot(false);
-        setHasVouchersSnapshot(false);
+        if (!options.silent) {
+            setHasOrdersSnapshot(false);
+            setHasProductsSnapshot(false);
+            setHasVouchersSnapshot(false);
+        }
         setLiveError(false);
 
         try {
@@ -235,6 +237,27 @@ export default function AdminPage() {
         });
         return () => unsubscribe();
     }, [fetchAdminData]);
+
+    useEffect(() => {
+        if (!user) return;
+
+        const refreshAdminData = () => {
+            void fetchAdminData({ silent: true });
+        };
+        const intervalId = window.setInterval(refreshAdminData, 5000);
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                refreshAdminData();
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            window.clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [user, fetchAdminData]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
