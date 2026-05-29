@@ -14,6 +14,21 @@ interface CartItem {
     quantity: number;
 }
 
+const parsePrice = (price: unknown) => {
+    if (typeof price === 'number') return price;
+    if (typeof price === 'string') return Number(price.replace(/[^0-9]/g, ''));
+    return 0;
+};
+
+const calculateEligibleSubtotal = (items: CartItem[], allowedProductIds: string[]) => {
+    if (!Array.isArray(allowedProductIds) || allowedProductIds.length === 0) return 0;
+    const allowedSet = new Set(allowedProductIds);
+    return items.reduce((sum, item) => {
+        if (!allowedSet.has(item.id)) return sum;
+        return sum + (parsePrice(item.price) * (Number(item.quantity) || 1));
+    }, 0);
+};
+
 export default function CheckoutPage() {
     const router = useRouter();
     const [cart, setCart] = useState<CartItem[]>([]);
@@ -31,7 +46,7 @@ export default function CheckoutPage() {
     
     const [uniqueCode, setUniqueCode] = useState<number>(0);
     const [voucherCode, setVoucherCode] = useState<string>('');
-    const [appliedVoucher, setAppliedVoucher] = useState<{ code: string; amount: number } | null>(null);
+    const [appliedVoucher, setAppliedVoucher] = useState<{ code: string; amount: number; allowedProductIds: string[] } | null>(null);
     const [isApplyingVoucher, setIsApplyingVoucher] = useState<boolean>(false);
 
     useEffect(() => {
@@ -41,14 +56,9 @@ export default function CheckoutPage() {
         setUniqueCode(Math.floor(Math.random() * 10) + 1);
     }, []);
 
-    const parsePrice = (price: any) => {
-        if (typeof price === 'number') return price;
-        if (typeof price === 'string') return Number(price.replace(/[^0-9]/g, ''));
-        return 0;
-    };
-
     const baseTotal = cart.reduce((sum, item) => sum + (parsePrice(item.price) * (Number(item.quantity) || 1)), 0);
-    const voucherDiscount = Math.min(appliedVoucher?.amount ?? 0, baseTotal);
+    const eligibleSubtotal = appliedVoucher ? calculateEligibleSubtotal(cart, appliedVoucher.allowedProductIds) : 0;
+    const voucherDiscount = Math.min(appliedVoucher?.amount ?? 0, eligibleSubtotal);
     const totalPay = Math.max(baseTotal - voucherDiscount, 0) + uniqueCode;
 
     const handleApplyVoucher = async () => {
@@ -65,7 +75,14 @@ export default function CheckoutPage() {
             const response = await fetch('/api/vouchers/validate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: normalizedCode }),
+                body: JSON.stringify({
+                    code: normalizedCode,
+                    items: cart.map((item) => ({
+                        id: item.id,
+                        price: item.price,
+                        quantity: item.quantity,
+                    })),
+                }),
             });
 
             if (!response.ok) {
@@ -75,12 +92,19 @@ export default function CheckoutPage() {
 
             const data = await response.json();
             const amount = Number(data.amount) || 0;
+            const appliedAmount = Number(data.appliedAmount) || 0;
+            const allowedProductIds = Array.isArray(data.allowedProductIds)
+                ? data.allowedProductIds.map((id: unknown) => String(id)).filter(Boolean)
+                : [];
             if (!Number.isFinite(amount) || amount <= 0) {
                 throw new Error('Voucher tidak valid.');
             }
+            if (!Number.isFinite(appliedAmount) || appliedAmount <= 0 || allowedProductIds.length === 0) {
+                throw new Error('Voucher tidak berlaku untuk produk di keranjang.');
+            }
 
-            setAppliedVoucher({ code: data.code || normalizedCode, amount });
-            toast.success(`Voucher diterapkan: -Rp ${Math.min(amount, baseTotal).toLocaleString('id-ID')}`, { id: loadingToast });
+            setAppliedVoucher({ code: data.code || normalizedCode, amount, allowedProductIds });
+            toast.success(`Voucher diterapkan: -Rp ${appliedAmount.toLocaleString('id-ID')}`, { id: loadingToast });
         } catch (error) {
             setAppliedVoucher(null);
             toast.error(error instanceof Error ? error.message : "Voucher tidak valid.", { id: loadingToast });

@@ -58,6 +58,7 @@ interface Voucher {
     amount: number;
     isActive?: boolean;
     createdAt?: unknown;
+    allowedProductIds?: string[];
 }
 
 const DASHBOARD_COLORS = ['#0f172a', '#ef4444', '#3b82f6', '#10b981', '#f59e0b'];
@@ -123,6 +124,7 @@ export default function AdminPage() {
     // Form States Voucher
     const [voucherCode, setVoucherCode] = useState<string>('');
     const [voucherAmount, setVoucherAmount] = useState<string>('');
+    const [voucherProductIds, setVoucherProductIds] = useState<string[]>([]);
     const [savingVoucher, setSavingVoucher] = useState<boolean>(false);
     const [editingVoucherId, setEditingVoucherId] = useState<string | null>(null);
 
@@ -188,12 +190,18 @@ export default function AdminPage() {
                 price: Number(product.price) || 0,
                 isActive: product.isActive !== undefined ? product.isActive : true,
             })));
-            setVouchers(voucherList.map((voucher) => ({
-                ...voucher,
-                code: (voucher.code || voucher.id || '').toString().toUpperCase(),
-                amount: Number(voucher.amount) || 0,
-                isActive: voucher.isActive !== undefined ? voucher.isActive : true,
-            })));
+            setVouchers(voucherList.map((voucher) => {
+                const rawAllowedProductIds = (voucher as Voucher).allowedProductIds;
+                return {
+                    ...voucher,
+                    code: (voucher.code || voucher.id || '').toString().toUpperCase(),
+                    amount: Number(voucher.amount) || 0,
+                    isActive: voucher.isActive !== undefined ? voucher.isActive : true,
+                    allowedProductIds: Array.isArray(rawAllowedProductIds)
+                        ? rawAllowedProductIds.map((id) => String(id)).filter(Boolean)
+                        : [],
+                };
+            }));
             setHasOrdersSnapshot(true);
             setHasProductsSnapshot(true);
             setHasVouchersSnapshot(true);
@@ -394,9 +402,10 @@ Terima Kasih`;
         e.preventDefault();
         const normalizedCode = voucherCode.trim().toUpperCase();
         const parsedAmount = Number(voucherAmount.replace(/[^0-9]/g, ''));
+        const normalizedProductIds = voucherProductIds.map((id) => String(id)).filter(Boolean);
 
-        if (!normalizedCode || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-            alert("Kode dan nominal voucher wajib diisi.");
+        if (!normalizedCode || !Number.isFinite(parsedAmount) || parsedAmount <= 0 || normalizedProductIds.length === 0) {
+            alert("Kode, nominal, dan produk voucher wajib diisi.");
             return;
         }
 
@@ -412,13 +421,17 @@ Terima Kasih`;
                         ...(await getAdminHeaders()),
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify(editingVoucherId ? { amount: parsedAmount } : { code: normalizedCode, amount: parsedAmount }),
+                    body: JSON.stringify(
+                        editingVoucherId
+                            ? { amount: parsedAmount, allowedProductIds: normalizedProductIds }
+                            : { code: normalizedCode, amount: parsedAmount, allowedProductIds: normalizedProductIds }
+                    ),
                 }
             );
 
             if (!response.ok) throw new Error('VOUCHER_SAVE_FAILED');
             alert(editingVoucherId ? "Voucher berhasil diperbarui!" : "Voucher baru berhasil ditambahkan!");
-            setVoucherCode(''); setVoucherAmount(''); setEditingVoucherId(null);
+            setVoucherCode(''); setVoucherAmount(''); setVoucherProductIds([]); setEditingVoucherId(null);
             await fetchAdminData();
         } catch {
             alert("Gagal menyimpan voucher.");
@@ -431,12 +444,22 @@ Terima Kasih`;
         setEditingVoucherId(voucher.id);
         setVoucherCode(voucher.code);
         setVoucherAmount(voucher.amount.toString());
+        setVoucherProductIds(Array.isArray(voucher.allowedProductIds) ? voucher.allowedProductIds : []);
     };
 
     const handleCancelVoucherEdit = () => {
         setEditingVoucherId(null);
         setVoucherCode('');
         setVoucherAmount('');
+        setVoucherProductIds([]);
+    };
+
+    const handleToggleVoucherProduct = (productId: string) => {
+        setVoucherProductIds((prev) => (
+            prev.includes(productId)
+                ? prev.filter((id) => id !== productId)
+                : [...prev, productId]
+        ));
     };
 
     const handleToggleVoucher = async (voucherId: string, currentStatus: boolean) => {
@@ -789,6 +812,17 @@ Terima Kasih`;
     const liveStatus = liveError
         ? 'error'
         : (hasOrdersSnapshot && hasProductsSnapshot && hasVouchersSnapshot ? 'connected' : 'connecting');
+
+    const productNameMap = new Map(products.map((product) => [product.id, product.name]));
+    const formatVoucherProducts = (voucher: Voucher) => {
+        const ids = Array.isArray(voucher.allowedProductIds) ? voucher.allowedProductIds : [];
+        if (ids.length === 0) return 'Belum diatur';
+        const names = ids.map((id) => productNameMap.get(id) || id).filter(Boolean);
+        const displayLimit = 3;
+        const visibleNames = names.slice(0, displayLimit);
+        const remaining = names.length - displayLimit;
+        return remaining > 0 ? `${visibleNames.join(', ')} +${remaining} lainnya` : visibleNames.join(', ');
+    };
     const liveStatusLabel = liveStatus === 'connected'
         ? 'Live Connected'
         : liveStatus === 'error'
@@ -1352,6 +1386,45 @@ Terima Kasih`;
                                         required
                                     />
                                 </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-700 mb-2">Produk yang Mendapat Voucher</label>
+                                    {products.length === 0 ? (
+                                        <p className="text-xs text-slate-400">Belum ada produk aktif untuk dipilih.</p>
+                                    ) : (
+                                        <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                                            {products.map((product) => (
+                                                <label key={product.id} className="flex items-center gap-2 text-xs text-slate-700">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                                                        checked={voucherProductIds.includes(product.id)}
+                                                        onChange={() => handleToggleVoucherProduct(product.id)}
+                                                    />
+                                                    <span className="font-semibold">{product.name}</span>
+                                                    <span className="text-[10px] text-slate-400">Rp {product.price.toLocaleString('id-ID')}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {products.length > 0 && (
+                                        <div className="flex flex-wrap gap-2 mt-3">
+                                            <button
+                                                type="button"
+                                                onClick={() => setVoucherProductIds(products.map((product) => product.id))}
+                                                className="text-[10px] font-bold uppercase text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg"
+                                            >
+                                                Pilih Semua
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setVoucherProductIds([])}
+                                                className="text-[10px] font-bold uppercase text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg"
+                                            >
+                                                Kosongkan
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="space-y-2 pt-2">
                                     <button type="submit" disabled={savingVoucher} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold disabled:bg-slate-400">
                                         {savingVoucher ? "Menyimpan..." : editingVoucherId ? "Simpan Perubahan" : "Terbitkan Voucher"}
@@ -1382,6 +1455,7 @@ Terima Kasih`;
                                                     </span>
                                                 </div>
                                                 <p className="text-xs text-slate-500 mt-1">Potongan: <span className="font-bold text-slate-700">Rp {voucher.amount.toLocaleString('id-ID')}</span></p>
+                                                <p className="text-[11px] text-slate-500 mt-1">Berlaku untuk: <span className="font-semibold text-slate-700">{formatVoucherProducts(voucher)}</span></p>
                                             </div>
                                             <div className="flex flex-wrap gap-2">
                                                 <button

@@ -38,6 +38,16 @@ export async function PATCH(
       updateData.isActive = body.isActive;
     }
 
+    if (body.allowedProductIds !== undefined) {
+      const normalizedAllowedProductIds = Array.isArray(body.allowedProductIds)
+        ? body.allowedProductIds.map((id: unknown) => String(id)).filter(Boolean)
+        : [];
+      if (normalizedAllowedProductIds.length === 0) {
+        return NextResponse.json({ message: 'Produk voucher harus dipilih.' }, { status: 400 });
+      }
+      updateData.allowedProductIds = normalizedAllowedProductIds;
+    }
+
     if (Object.keys(updateData).length === 2) {
       return NextResponse.json({ message: 'Tidak ada perubahan voucher.' }, { status: 400 });
     }
