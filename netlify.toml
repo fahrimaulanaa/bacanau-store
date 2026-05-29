@@ -1,8 +1,9 @@
-[[redirects]]
-  from = "http://bacanaustore.netlify.app/*"
-  to = "https://bacanaustore.netlify.app/:splat"
-  status = 301
-  force = true
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 [[headers]]
   for = "/*"

@@ -91,6 +91,7 @@ export default function AdminPage() {
 
     // Dashboard States
     const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products'>('dashboard');
+    const [isAdminMenuOpen, setIsAdminMenuOpen] = useState<boolean>(false);
     const [orders, setOrders] = useState<Order[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [hasOrdersSnapshot, setHasOrdersSnapshot] = useState<boolean>(false);
@@ -354,6 +355,11 @@ Terima Kasih`;
         } catch {
             alert("Gagal menghapus produk.");
         }
+    };
+
+    const handleSelectAdminTab = (tab: 'dashboard' | 'orders' | 'products') => {
+        setActiveTab(tab);
+        setIsAdminMenuOpen(false);
     };
 
     const handleExportExcel = () => {
@@ -704,13 +710,13 @@ Terima Kasih`;
     return (
         <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative">
             <nav className="glasshour-navbar sticky top-0 z-30">
-                <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+                <div className="max-w-7xl mx-auto px-4 py-3 sm:py-4 flex justify-between items-center gap-3">
                     <div className="flex items-center gap-3">
                         <span className="bg-slate-900 text-white text-xs font-black px-2 py-1 rounded">PRO</span>
-                        <h1 className="text-xl font-black tracking-tight text-slate-900">BACANAU ADMIN</h1>
+                        <h1 className="text-lg sm:text-xl font-black tracking-tight text-slate-900">BACANAU ADMIN</h1>
                     </div>
                     
-                    <div className="flex items-center gap-2 sm:gap-4">
+                    <div className="hidden sm:flex items-center gap-2 sm:gap-4">
                         <button
                             type="button"
                             onClick={handleExportExcel}
@@ -771,18 +777,68 @@ Terima Kasih`;
                             Home
                         </Link>
                     </div>
+
+                    <div className="flex sm:hidden items-center gap-2">
+                        <div className="text-[11px] font-bold text-slate-600 bg-white/80 px-2.5 py-2 rounded-xl border border-white/70 flex items-center gap-1.5 select-none shadow-sm">
+                            <span className={`h-2 w-2 rounded-full ${liveStatusColor}`} />
+                            <span>{liveStatusLabel}</span>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setIsAdminMenuOpen((value) => !value)}
+                            aria-label="Buka menu admin"
+                            aria-expanded={isAdminMenuOpen}
+                            className="h-10 w-10 rounded-xl bg-slate-900 text-white shadow-lg flex items-center justify-center"
+                        >
+                            <span className="flex flex-col gap-1">
+                                <span className="block h-0.5 w-5 rounded-full bg-white" />
+                                <span className="block h-0.5 w-5 rounded-full bg-white" />
+                                <span className="block h-0.5 w-5 rounded-full bg-white" />
+                            </span>
+                        </button>
+                    </div>
                 </div>
+
+                {isAdminMenuOpen && (
+                    <div className="sm:hidden border-t border-white/60 bg-white/95 px-4 py-4 shadow-xl backdrop-blur-xl">
+                        <div className="grid grid-cols-1 gap-2">
+                            <button onClick={() => handleSelectAdminTab('dashboard')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'dashboard' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                                Ringkasan ({orders.length} Pesanan)
+                            </button>
+                            <button onClick={() => handleSelectAdminTab('orders')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'orders' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                                Verifikasi Pesanan ({orders.length})
+                            </button>
+                            <button onClick={() => handleSelectAdminTab('products')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'products' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                                Kelola Katalog Produk ({products.length})
+                            </button>
+                        </div>
+                        <div className="mt-4 grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => { handleExportExcel(); setIsAdminMenuOpen(false); }} disabled={!canExport} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs font-bold text-emerald-700 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">
+                                Export Excel
+                            </button>
+                            <button type="button" onClick={() => { handleExportPdf(); setIsAdminMenuOpen(false); }} disabled={!canExport} className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs font-bold text-red-600 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">
+                                Export PDF
+                            </button>
+                            <Link href="/" onClick={() => setIsAdminMenuOpen(false)} className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center text-xs font-bold text-slate-700">
+                                Home
+                            </Link>
+                            <button onClick={handleLogout} className="rounded-xl border border-red-200 bg-white px-3 py-3 text-xs font-bold text-red-600">
+                                Keluar
+                            </button>
+                        </div>
+                    </div>
+                )}
             </nav>
 
             <main className="max-w-7xl mx-auto px-4 py-8">
-                <div className="flex border-b border-slate-200 mb-6 gap-2">
-                    <button onClick={() => setActiveTab('dashboard')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'dashboard' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                <div className="hidden sm:flex border-b border-slate-200 mb-6 gap-2">
+                    <button onClick={() => handleSelectAdminTab('dashboard')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'dashboard' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         📊 Ringkasan ({orders.length} Pesanan)
                     </button>
-                    <button onClick={() => setActiveTab('orders')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'orders' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                    <button onClick={() => handleSelectAdminTab('orders')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'orders' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         📦 Verifikasi Pesanan ({orders.length})
                     </button>
-                    <button onClick={() => setActiveTab('products')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'products' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                    <button onClick={() => handleSelectAdminTab('products')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'products' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         👕 Kelola Katalog Produk ({products.length})
                     </button>
                 </div>

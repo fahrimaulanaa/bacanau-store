@@ -1,7 +1,8 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
-import serviceAccount from './bacanaustore-firebase-adminsdk-fbsvc-9aad4e5837.json';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 type ServiceAccountConfig = {
   project_id: string;
@@ -22,7 +23,18 @@ function getServiceAccount() {
     };
   }
 
-  const localServiceAccount = serviceAccount as ServiceAccountConfig;
+  const serviceAccountPath = join(
+    process.cwd(),
+    'lib',
+    'server',
+    'bacanaustore-firebase-adminsdk-fbsvc-9aad4e5837.json'
+  );
+
+  if (!existsSync(serviceAccountPath)) {
+    throw new Error('Firebase Admin credentials are not configured on this server.');
+  }
+
+  const localServiceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8')) as ServiceAccountConfig;
 
   return {
     projectId: localServiceAccount.project_id,
