@@ -271,6 +271,7 @@ function PayContent() {
             const uploadFile = new File([compressedFile], `${orderId}_bukti.jpg`, { type: 'image/jpeg' });
             const uploadFormData = new FormData();
             uploadFormData.append('orderId', orderId);
+            uploadFormData.append('clientAutoMatch', String(autoMatch));
             uploadFormData.append('file', uploadFile);
 
             const uploadResponse = await fetch('/api/payment-proof', {
