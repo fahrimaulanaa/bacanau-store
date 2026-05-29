@@ -1,10 +1,8 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from 'react';
-import { collection, doc, updateDoc, deleteDoc, addDoc, onSnapshot } from 'firebase/firestore';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { db, auth } from '../../lib/firebase'; 
-import { supabase } from '../../lib/supabase';
+import { auth } from '../../lib/firebase'; 
 import imageCompression from 'browser-image-compression';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
@@ -125,6 +123,55 @@ export default function AdminPage() {
         };
     }, [prodImagePreview]);
 
+    const getAdminHeaders = useCallback(async () => {
+        const token = await auth.currentUser?.getIdToken();
+        if (!token) {
+            throw new Error('NO_ADMIN_TOKEN');
+        }
+
+        return {
+            Authorization: `Bearer ${token}`,
+        };
+    }, []);
+
+    const fetchAdminData = useCallback(async () => {
+        if (!auth.currentUser) return;
+
+        setHasOrdersSnapshot(false);
+        setHasProductsSnapshot(false);
+        setLiveError(false);
+
+        try {
+            const response = await fetch('/api/admin/data', {
+                headers: await getAdminHeaders(),
+                cache: 'no-store',
+            });
+
+            if (!response.ok) {
+                throw new Error('ADMIN_DATA_FAILED');
+            }
+
+            const data = await response.json();
+            const orderList = (data.orders || []) as Order[];
+            const productList = (data.products || []) as Product[];
+
+            setOrders(orderList.sort((a, b) => {
+                const dateA = getCreatedAtDate(a.createdAt)?.getTime() || 0;
+                const dateB = getCreatedAtDate(b.createdAt)?.getTime() || 0;
+                return dateB - dateA;
+            }));
+            setProducts(productList.map((product) => ({
+                ...product,
+                price: Number(product.price) || 0,
+                isActive: product.isActive !== undefined ? product.isActive : true,
+            })));
+            setHasOrdersSnapshot(true);
+            setHasProductsSnapshot(true);
+        } catch {
+            setLiveError(true);
+        }
+    }, [getAdminHeaders]);
+
     // Monitor Status Login
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -139,58 +186,14 @@ export default function AdminPage() {
                 setHasOrdersSnapshot(false);
                 setHasProductsSnapshot(false);
                 setLiveError(false);
+                setTimeout(() => {
+                    void fetchAdminData();
+                }, 0);
             }
             setAuthLoading(false);
         });
         return () => unsubscribe();
-    }, []);
-
-    // REAL-TIME LISTENER (LIVE DETECT) FIRESTORE
-    useEffect(() => {
-        if (!user) {
-            return;
-        }
-        // 1. Live Listener untuk Koleksi Orders
-        const unsubscribeOrders = onSnapshot(collection(db, "orders"), (snapshot) => {
-            const orderList = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            })) as Order[];
-            setOrders(orderList.sort((a, b) => {
-                const dateA = getCreatedAtDate(a.createdAt)?.getTime() || 0;
-                const dateB = getCreatedAtDate(b.createdAt)?.getTime() || 0;
-                return dateB - dateA;
-            }));
-            setHasOrdersSnapshot(true);
-            setLiveError(false);
-        }, () => {
-            setLiveError(true);
-        });
-
-        // 2. Live Listener untuk Koleksi Products
-        const unsubscribeProducts = onSnapshot(collection(db, "products"), (snapshot) => {
-            const prodList = snapshot.docs.map(doc => {
-                const d = doc.data();
-                return {
-                    id: doc.id,
-                    name: d.name || d.nama_produk || "Produk Tanpa Nama",
-                    price: Number(d.price || d.harga_produk) || 0,
-                    img: d.img || d.url_gambar || "",
-                    isActive: d.isActive !== undefined ? d.isActive : true // Default true jika field belum ada
-                };
-            }) as Product[];
-            setProducts(prodList);
-            setHasProductsSnapshot(true);
-            setLiveError(false);
-        }, () => {
-            setLiveError(true);
-        });
-
-        return () => {
-            unsubscribeOrders();
-            unsubscribeProducts();
-        };
-    }, [user]);
+    }, [fetchAdminData]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -209,8 +212,17 @@ export default function AdminPage() {
     // FUNGSI PESANAN: Verifikasi / Ubah Status
     const handleUpdateStatus = async (orderId: string, newStatus: string) => {
         try {
-            const orderRef = doc(db, "orders", orderId);
-            await updateDoc(orderRef, { status: newStatus });
+            const response = await fetch(`/api/admin/orders/${encodeURIComponent(orderId)}`, {
+                method: 'PATCH',
+                headers: {
+                    ...(await getAdminHeaders()),
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ status: newStatus }),
+            });
+
+            if (!response.ok) throw new Error('ORDER_UPDATE_FAILED');
+            await fetchAdminData();
         } catch {
             alert("Gagal merubah status pesanan.");
         }
@@ -220,7 +232,13 @@ export default function AdminPage() {
     const handleDeleteOrder = async (orderId: string) => {
         if (!confirm("Apakah Anda yakin ingin menghapus pesanan ini secara permanen?")) return;
         try {
-            await deleteDoc(doc(db, "orders", orderId));
+            const response = await fetch(`/api/admin/orders/${encodeURIComponent(orderId)}`, {
+                method: 'DELETE',
+                headers: await getAdminHeaders(),
+            });
+
+            if (!response.ok) throw new Error('ORDER_DELETE_FAILED');
+            await fetchAdminData();
         } catch {
             alert("Gagal menghapus pesanan.");
         }
@@ -263,8 +281,11 @@ Terima Kasih`;
 
         setSavingProduct(true);
         try {
-            let productImageUrl = prodImg;
-
+            const formData = new FormData();
+            formData.append('name', prodName);
+            formData.append('price', prodPrice);
+            formData.append('img', prodImg);
+            
             if (prodImageFile) {
                 const compressedImage = await imageCompression(prodImageFile, {
                     maxSizeMB: 0.5,
@@ -273,31 +294,19 @@ Terima Kasih`;
                     fileType: 'image/jpeg',
                     initialQuality: 0.8,
                 });
-                const safeName = prodName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'produk';
-                const fileName = `${editingProductId || Date.now()}-${safeName}.jpg`;
-                const uploadFile = new File([compressedImage], fileName, { type: 'image/jpeg' });
-                const { error: uploadError } = await supabase.storage.from('produk').upload(fileName, uploadFile, {
-                    cacheControl: '3600',
-                    upsert: true,
-                });
-
-                if (uploadError) throw uploadError;
-
-                const { data: { publicUrl } } = supabase.storage.from('produk').getPublicUrl(fileName);
-                productImageUrl = publicUrl;
+                formData.append('image', new File([compressedImage], `${prodName || 'produk'}.jpg`, { type: 'image/jpeg' }));
             }
 
-            const productData = { name: prodName, price: Number(prodPrice.replace(/[^0-9]/g, '')), img: productImageUrl };
+            const response = await fetch(editingProductId ? `/api/admin/products/${encodeURIComponent(editingProductId)}` : '/api/admin/products', {
+                method: editingProductId ? 'PATCH' : 'POST',
+                headers: await getAdminHeaders(),
+                body: formData,
+            });
 
-            if (editingProductId) {
-                await updateDoc(doc(db, "products", editingProductId), productData);
-                alert("Produk berhasil diperbarui!");
-            } else {
-                // Produk baru otomatis memiliki properti isActive: true
-                await addDoc(collection(db, "products"), { ...productData, isActive: true });
-                alert("Produk baru berhasil ditambahkan!");
-            }
+            if (!response.ok) throw new Error('PRODUCT_SAVE_FAILED');
+            alert(editingProductId ? "Produk berhasil diperbarui!" : "Produk baru berhasil ditambahkan!");
             setProdName(''); setProdPrice(''); setProdImg(''); setProdImageFile(null); setEditingProductId(null);
+            await fetchAdminData();
         } catch {
             alert("Gagal menyimpan data produk. Pastikan bucket Supabase 'produk' sudah dibuat dan policy upload publik/admin sudah aktif.");
         } finally {
@@ -308,8 +317,17 @@ Terima Kasih`;
     // FUNGSI BARU: Toggle Suspend / Aktifkan Produk
     const handleToggleSuspend = async (productId: string, currentStatus: boolean) => {
         try {
-            const productRef = doc(db, "products", productId);
-            await updateDoc(productRef, { isActive: !currentStatus });
+            const response = await fetch(`/api/admin/products/${encodeURIComponent(productId)}`, {
+                method: 'PATCH',
+                headers: {
+                    ...(await getAdminHeaders()),
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ isActive: !currentStatus }),
+            });
+
+            if (!response.ok) throw new Error('PRODUCT_TOGGLE_FAILED');
+            await fetchAdminData();
         } catch {
             alert("Gagal mengubah status suspend produk.");
         }
@@ -326,7 +344,13 @@ Terima Kasih`;
     const handleDeleteProduct = async (productId: string) => {
         if (!confirm("Apakah Anda yakin ingin menghapus produk ini dari katalog?")) return;
         try {
-            await deleteDoc(doc(db, "products", productId));
+            const response = await fetch(`/api/admin/products/${encodeURIComponent(productId)}`, {
+                method: 'DELETE',
+                headers: await getAdminHeaders(),
+            });
+
+            if (!response.ok) throw new Error('PRODUCT_DELETE_FAILED');
+            await fetchAdminData();
         } catch {
             alert("Gagal menghapus produk.");
         }

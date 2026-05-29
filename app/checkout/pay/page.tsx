@@ -2,15 +2,11 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../../lib/firebase'; 
-import { supabase } from '../../../lib/supabase'; 
 import Link from 'next/link';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Tesseract from 'tesseract.js';
 import { Toaster, toast } from 'react-hot-toast'; 
-import emailjs from '@emailjs/browser'; 
 import imageCompression from 'browser-image-compression';
 
 interface OrderItem {
@@ -34,7 +30,6 @@ function PayContent() {
     const [paymentMethod, setPaymentMethod] = useState<string>('QRIS'); // State untuk metode pembayaran
     
     const [buyerName, setBuyerName] = useState<string>('');
-    const [buyerEmail, setBuyerEmail] = useState<string>(''); 
     const [buyerContact, setBuyerContact] = useState<string>('');
     const [buyerDomicile, setBuyerDomicile] = useState<string>('');
     const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -87,11 +82,13 @@ function PayContent() {
                 return;
             }
             try {
-                const docRef = doc(db, "orders", orderId);
-                const docSnap = await getDoc(docRef);
+                const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+                    method: 'GET',
+                    cache: 'no-store',
+                });
 
-                if (docSnap.exists()) {
-                    const orderData = docSnap.data();
+                if (response.ok) {
+                    const orderData = await response.json();
                     const paymentAmount = Number(orderData.totalPayment) || 0;
                     const itemsArr = (orderData.items || []) as OrderItem[];
                     
@@ -101,7 +98,6 @@ function PayContent() {
                     setUniqueCode(paymentAmount - calculatedBaseTotal);
                     
                     setBuyerName(orderData.customerName || 'Pelanggan');
-                    setBuyerEmail(orderData.customerEmail || ''); 
                     setBuyerContact(orderData.contactInfo || '-');
                     setBuyerDomicile(orderData.domicile || '-');
                     setPaymentMethod(orderData.paymentMethod || 'QRIS'); // Set metode pembayaran dari DB
@@ -111,8 +107,10 @@ function PayContent() {
                     if (orderData.paymentMethod === 'QRIS' || !orderData.paymentMethod) {
                         fetchDynamicQris(paymentAmount);
                     }
-                } else {
+                } else if (response.status === 404) {
                     setErrorMsg("Data transaksi tidak ditemukan.");
+                } else {
+                    setErrorMsg("Gagal terhubung ke database server.");
                 }
             } catch {
                 setErrorMsg("Gagal terhubung ke database server.");
@@ -123,23 +121,6 @@ function PayContent() {
 
         if (orderId) fetchOrderData();
     }, [orderId]);
-
-    // FUNGSI PENGIRIM EMAIL OTOMATIS
-    const sendAutomatedEmail = () => {
-        if (!buyerEmail) return;
-        
-        const templateParams = {
-            to_name: buyerName,
-            to_email: buyerEmail,
-            order_id: orderId,
-            total_amount: `Rp ${totalPay.toLocaleString('id-ID')}`,
-            status: "LUNAS (Verified by AI)"
-        };
-
-        emailjs.send('service_5f5q7r9', 'template_ble6ki6', templateParams, 'D5jRZ-GnOQKPhIljJ')
-            .then(() => toast.success(`Tanda terima terkirim ke Email: ${buyerEmail}`))
-            .catch(() => toast.error("Gagal mengirim email notifikasi."));
-    };
 
     const handleCopyNumber = () => {
         navigator.clipboard.writeText("085174237980");
@@ -271,33 +252,31 @@ function PayContent() {
                 initialQuality: 0.75,
             });
             const uploadFile = new File([compressedFile], `${orderId}_bukti.jpg`, { type: 'image/jpeg' });
-            const fileExt = 'jpg';
-            const fileName = `${orderId}_bukti.${fileExt}`;
-            const { error: uploadError } = await supabase.storage.from('bukti-pembayaran').upload(fileName, uploadFile, { cacheControl: '3600', upsert: true });
-            if (uploadError) throw uploadError;
+            const uploadFormData = new FormData();
+            uploadFormData.append('orderId', orderId);
+            uploadFormData.append('file', uploadFile);
 
-            const { data: { publicUrl } } = supabase.storage.from('bukti-pembayaran').getPublicUrl(fileName);
-
-            const newStatus = autoMatch ? "Selesai (Lunas)" : "Sudah Bayar (Mengecek Bukti)";
-            await updateDoc(doc(db, "orders", orderId), {
-                paymentProofUrl: publicUrl,
-                status: newStatus,
-                updatedAt: new Date()
+            const uploadResponse = await fetch('/api/payment-proof', {
+                method: 'POST',
+                body: uploadFormData,
             });
+
+            if (!uploadResponse.ok) {
+                const errorData = await uploadResponse.json().catch(() => null);
+                throw new Error(errorData?.message || 'UPLOAD_FAILED');
+            }
+
+            const uploadResult = await uploadResponse.json();
 
             setTimeout(() => {
                 setOcrPopup(null);
-                setIsAutoVerified(autoMatch);
+                setIsAutoVerified(uploadResult.autoVerified === true);
                 setUploadSuccess(true);
-                
-                if (autoMatch) {
-                    sendAutomatedEmail();
-                }
             }, 3000);
 
-        } catch {
+        } catch (error) {
             toast.dismiss(loadingToast);
-            toast.error("Terjadi kendala saat memproses bukti bayar.");
+            toast.error(error instanceof Error ? error.message : "Terjadi kendala saat memproses bukti bayar.");
             setUploading(false);
         } 
     };
