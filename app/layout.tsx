@@ -3,6 +3,7 @@ import "./globals.css";
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://bacanaustore.netlify.app'),
   title: 'Bacanau Store | Platform Apparel & Digital Art Kampus',
   description: 'Official e-commerce Bacanau Store. Beli apapun yang kami jual hehe',
   keywords: ['Bacanau Store', 'BaCaNau', 'Nautika ITB', 'Streetwear Bandung', 'Digital Art Bacanau'],
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
     siteName: 'Bacanau Store',
     images: [
       {
-        url: '../public/logo_bacanau_25.png', // Ganti dengan URL gambar logomu
+        url: '/logo_bacanau_25.png',
         width: 1200,
         height: 630,
       },
