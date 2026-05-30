@@ -39,6 +39,7 @@ interface Order {
     voucherCode?: string;
     voucherAmount?: number;
     status: string;
+    paymentMethod?: string;
     paymentProofUrl?: string;
     items: OrderItem[];
     createdAt: unknown;
@@ -97,6 +98,11 @@ function getDayLabel(date: Date) {
     return date.toLocaleDateString('id-ID', { weekday: 'short' });
 }
 
+function normalizeProductCategory(category: unknown) {
+    const normalized = String(category || '').trim();
+    return normalized || 'Lainnya';
+}
+
 export default function AdminPage() {
     // Auth States
     const [user, setUser] = useState<User | null>(null);
@@ -148,13 +154,19 @@ export default function AdminPage() {
     const productCategoryOptions = useMemo(() => {
         const categorySet = new Set(DEFAULT_PRODUCT_CATEGORIES);
         products.forEach((product) => {
-            const category = (product.category || '').trim();
-            if (category) categorySet.add(category);
+            categorySet.add(normalizeProductCategory(product.category));
         });
         const selectedCategory = prodCategory.trim();
         if (selectedCategory) categorySet.add(selectedCategory);
         return Array.from(categorySet);
     }, [prodCategory, products]);
+
+    const productsByCategory = useMemo(() => {
+        return productCategoryOptions.map((category) => ({
+            category,
+            products: products.filter((product) => normalizeProductCategory(product.category) === category),
+        }));
+    }, [productCategoryOptions, products]);
 
     useEffect(() => {
         return () => {
@@ -209,7 +221,7 @@ export default function AdminPage() {
             setProducts(productList.map((product) => ({
                 ...product,
                 price: Number(product.price) || 0,
-                category: product.category || 'Makanan',
+                category: normalizeProductCategory(product.category),
                 isActive: product.isActive !== undefined ? product.isActive : true,
             })));
             setVouchers(voucherList.map((voucher) => {
@@ -645,128 +657,152 @@ Terima Kasih`;
     };
 
     const handleExportPdf = () => {
-        if (orders.length === 0 && products.length === 0) {
-            alert("Tidak ada data untuk diexport.");
+        if (orders.length === 0) {
+            alert("Tidak ada data pesanan untuk diexport.");
             return;
         }
 
         const exportDate = new Date();
         const exportStamp = exportDate.toISOString().slice(0, 19).replace(/[:T]/g, '-');
         const exportLabel = exportDate.toLocaleString('id-ID');
-        const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const marginX = 40;
         const getNextTableY = (fallback: number) => {
             const lastTable = (pdf as jsPDF & { lastAutoTable?: { finalY: number } }).lastAutoTable;
             return (lastTable?.finalY ?? fallback) + 20;
         };
+        const ensureSpace = (requiredHeight = 120) => {
+            if (getNextTableY(90) + requiredHeight > pageHeight - 45) {
+                pdf.addPage();
+                return 54;
+            }
+            return getNextTableY(90);
+        };
+        const formatOrderDate = (createdAt: unknown) => {
+            const date = getCreatedAtDate(createdAt);
+            return date ? date.toLocaleString('id-ID') : '-';
+        };
 
-        pdf.setFontSize(16);
-        pdf.text('Bacanau Admin Export', 40, 40);
+        pdf.setFillColor(15, 23, 42);
+        pdf.rect(0, 0, pageWidth, 72, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(18);
+        pdf.text('BACANAU 25 STORE', marginX, 32);
+        pdf.setFontSize(12);
+        pdf.text('Laporan Data Pesanan', marginX, 52);
         pdf.setFontSize(10);
-        pdf.setTextColor(100);
-        pdf.text(`Generated: ${exportLabel}`, 40, 58);
+        pdf.text(`Tanggal export: ${exportLabel}`, pageWidth - marginX, 32, { align: 'right' });
         pdf.setTextColor(0);
 
+        const totalItemsSold = orders.reduce((sum, order) => (
+            sum + (order.items || []).reduce((itemSum, item) => itemSum + (Number(item.quantity) || 0), 0)
+        ), 0);
         const summaryRows = [
-            ['Generated At', exportLabel],
             ['Total Pesanan', String(dashboardData.totalOrders)],
-            ['Total Produk', String(dashboardData.totalProducts)],
-            ['Produk Aktif', String(dashboardData.activeProducts)],
-            ['Produk Disuspend', String(dashboardData.suspendedProducts)],
-            ['Pesanan Menunggu Pembayaran', String(dashboardData.pendingOrders)],
-            ['Pesanan Mengecek Bukti', String(dashboardData.reviewingOrders)],
-            ['Pesanan Selesai', String(dashboardData.completedOrders)],
-            ['Pesanan Dibatalkan', String(dashboardData.canceledOrders)],
+            ['Total Item Terjual', String(totalItemsSold)],
             ['Pendapatan Kotor', formatCurrency(dashboardData.grossRevenue)],
             ['Pendapatan Selesai', formatCurrency(dashboardData.completedRevenue)],
             ['Rata-rata Transaksi', formatCurrency(dashboardData.averageOrderValue)],
+            ['Menunggu Pembayaran', String(dashboardData.pendingOrders)],
+            ['Mengecek Bukti', String(dashboardData.reviewingOrders)],
+            ['Selesai', String(dashboardData.completedOrders)],
+            ['Dibatalkan', String(dashboardData.canceledOrders)],
         ];
 
         autoTable(pdf, {
-            startY: 80,
+            startY: 92,
             head: [['Ringkasan', 'Nilai']],
             body: summaryRows,
             theme: 'striped',
             styles: { fontSize: 9 },
             headStyles: { fillColor: [15, 23, 42] },
+            margin: { left: marginX, right: marginX },
         });
 
-        const ordersTable = orders.map((order) => {
-            const createdAt = getCreatedAtDate(order.createdAt);
-            return [
-                order.id,
-                order.customerName,
-                order.contactInfo,
-                order.domicile,
-                order.status,
-                formatCurrency(Number(order.totalPayment) || 0),
-                createdAt ? createdAt.toLocaleString('id-ID') : '',
-                order.paymentProofUrl ? 'Ada' : 'Tidak',
-            ];
+        const sortedOrders = [...orders].sort((a, b) => {
+            const dateA = getCreatedAtDate(a.createdAt)?.getTime() || 0;
+            const dateB = getCreatedAtDate(b.createdAt)?.getTime() || 0;
+            return dateB - dateA;
         });
 
-        autoTable(pdf, {
-            startY: getNextTableY(80),
-            head: [['Order ID', 'Pelanggan', 'Kontak', 'Domisili', 'Status', 'Total', 'Tanggal', 'Bukti']],
-            body: ordersTable.length ? ordersTable : [['-', 'Tidak ada pesanan', '-', '-', '-', '-', '-', '-']],
-            styles: { fontSize: 8 },
-            headStyles: { fillColor: [15, 23, 42] },
-            columnStyles: {
-                5: { halign: 'right' },
-            },
-        });
-
-        const itemsTable = orders.flatMap((order) => {
-            const createdAt = getCreatedAtDate(order.createdAt);
-            return (order.items ?? []).map((item) => {
+        sortedOrders.forEach((order, index) => {
+            const items = order.items || [];
+            const itemRows = items.length > 0
+                ? items.map((item) => {
                 const quantity = Number(item.quantity) || 0;
                 const price = Number(item.price) || 0;
                 return [
-                    order.id,
-                    order.customerName,
-                    order.status,
-                    createdAt ? createdAt.toLocaleString('id-ID') : '',
                     item.name,
                     String(quantity),
                     formatCurrency(price),
                     formatCurrency(price * quantity),
+                    formatCurrency(price * quantity),
                 ];
+            })
+                : [['Tidak ada item tercatat', '-', '-', '-']];
+            const basePayment = Number(order.basePayment) || items.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 0), 0);
+            const voucherAmount = Number(order.voucherAmount) || 0;
+            const uniqueCode = Number(order.uniqueCode) || 0;
+            const notes = String((order as Order & { notes?: unknown; note?: unknown }).notes || (order as Order & { notes?: unknown; note?: unknown }).note || '').trim();
+
+            const sectionY = ensureSpace(160);
+            pdf.setFontSize(12);
+            pdf.setTextColor(15, 23, 42);
+            pdf.text(`Pesanan ${index + 1}: ${order.id}`, marginX, sectionY);
+
+            autoTable(pdf, {
+                startY: sectionY + 8,
+                body: [
+                    ['Nama Pelanggan', order.customerName || '-', 'Tanggal', formatOrderDate(order.createdAt)],
+                    ['Kontak', order.contactInfo || '-', 'Domisili', order.domicile || '-'],
+                    ['Status Pesanan', order.status || '-', 'Status Bayar', order.paymentProofUrl ? 'Bukti diterima' : 'Belum ada bukti'],
+                    ['Metode Pembayaran', order.paymentMethod || 'QRIS', 'Total', formatCurrency(Number(order.totalPayment) || 0)],
+                    ...(notes ? [['Catatan', notes, '', '']] : []),
+                ],
+                theme: 'plain',
+                styles: { fontSize: 8, cellPadding: 4 },
+                columnStyles: {
+                    0: { fontStyle: 'bold', textColor: [71, 85, 105], cellWidth: 82 },
+                    1: { cellWidth: 160 },
+                    2: { fontStyle: 'bold', textColor: [71, 85, 105], cellWidth: 72 },
+                    3: { cellWidth: 176 },
+                },
+                margin: { left: marginX, right: marginX },
+            });
+
+            autoTable(pdf, {
+                startY: getNextTableY(sectionY + 8),
+                head: [['Item Pesanan', 'Qty', 'Harga Satuan', 'Subtotal']],
+                body: [
+                    ...itemRows,
+                    ['Subtotal Pesanan', '', '', formatCurrency(basePayment)],
+                    ...(voucherAmount > 0 ? [[`Voucher ${order.voucherCode ? `(${order.voucherCode})` : ''}`, '', '', `- ${formatCurrency(voucherAmount)}`]] : []),
+                    ...(uniqueCode > 0 ? [['Kode Unik', '', '', formatCurrency(uniqueCode)]] : []),
+                    ['Total Bayar', '', '', formatCurrency(Number(order.totalPayment) || 0)],
+                ],
+                styles: { fontSize: 8, cellPadding: 5 },
+                headStyles: { fillColor: [15, 23, 42] },
+                alternateRowStyles: { fillColor: [248, 250, 252] },
+                columnStyles: {
+                    1: { halign: 'center', cellWidth: 45 },
+                    2: { halign: 'right', cellWidth: 95 },
+                    3: { halign: 'right', cellWidth: 95, fontStyle: 'bold' },
+                },
+                margin: { left: marginX, right: marginX },
             });
         });
 
-        autoTable(pdf, {
-            startY: getNextTableY(80),
-            head: [['Order ID', 'Pelanggan', 'Status', 'Tanggal', 'Item', 'Qty', 'Harga', 'Subtotal']],
-            body: itemsTable.length ? itemsTable : [['-', '-', '-', '-', 'Tidak ada item pesanan', '-', '-', '-']],
-            styles: { fontSize: 8 },
-            headStyles: { fillColor: [15, 23, 42] },
-            columnStyles: {
-                5: { halign: 'right' },
-                6: { halign: 'right' },
-                7: { halign: 'right' },
-            },
-        });
+        const pageCount = pdf.getNumberOfPages();
+        for (let page = 1; page <= pageCount; page += 1) {
+            pdf.setPage(page);
+            pdf.setFontSize(8);
+            pdf.setTextColor(148, 163, 184);
+            pdf.text(`Halaman ${page} dari ${pageCount}`, pageWidth - marginX, pageHeight - 24, { align: 'right' });
+        }
 
-        const productsTable = products.map((product) => [
-            product.id,
-            product.name,
-            product.category || 'Makanan',
-            formatCurrency(product.price),
-            (product.isActive ?? true) ? 'Aktif' : 'Suspend',
-            product.img,
-        ]);
-
-        autoTable(pdf, {
-            startY: getNextTableY(80),
-            head: [['Product ID', 'Nama Produk', 'Kategori', 'Harga', 'Status', 'URL Gambar']],
-            body: productsTable.length ? productsTable : [['-', 'Tidak ada produk', '-', '-', '-', '-']],
-            styles: { fontSize: 8 },
-            headStyles: { fillColor: [15, 23, 42] },
-            columnStyles: {
-                2: { halign: 'right' },
-            },
-        });
-
-        pdf.save(`bacanau-admin-export-${exportStamp}.pdf`);
+        pdf.save(`bacanau-laporan-pesanan-${exportStamp}.pdf`);
     };
 
     const dashboardData = (() => {
@@ -891,6 +927,7 @@ Terima Kasih`;
             ? 'bg-red-500'
             : 'bg-amber-500';
     const canExport = orders.length > 0 || products.length > 0;
+    const canExportOrders = orders.length > 0;
 
     if (authLoading) return <div className="min-h-screen bg-slate-900 flex justify-center items-center text-white"><p className="animate-pulse">Memverifikasi Admin...</p></div>;
 
@@ -946,9 +983,9 @@ Terima Kasih`;
                         <button
                             type="button"
                             onClick={handleExportPdf}
-                            disabled={!canExport}
+                            disabled={!canExportOrders}
                             className={`text-xs font-bold px-3 py-2 rounded-xl border transition-colors inline-flex items-center gap-2 ${
-                                canExport
+                                canExportOrders
                                     ? 'text-red-600 bg-red-50 border-red-200 hover:bg-red-100'
                                     : 'text-slate-400 bg-slate-100 border-slate-200 cursor-not-allowed'
                             }`}
@@ -1037,7 +1074,7 @@ Terima Kasih`;
                             <button type="button" onClick={() => { handleExportExcel(); setIsAdminMenuOpen(false); }} disabled={!canExport} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs font-bold text-emerald-700 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">
                                 Export Excel
                             </button>
-                            <button type="button" onClick={() => { handleExportPdf(); setIsAdminMenuOpen(false); }} disabled={!canExport} className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs font-bold text-red-600 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">
+                            <button type="button" onClick={() => { handleExportPdf(); setIsAdminMenuOpen(false); }} disabled={!canExportOrders} className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs font-bold text-red-600 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">
                                 Export PDF
                             </button>
                             <Link href="/" onClick={() => setIsAdminMenuOpen(false)} className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center text-xs font-bold text-slate-700">
@@ -1415,38 +1452,49 @@ Terima Kasih`;
                             </form>
                         </div>
                         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                            <h2 className="text-lg font-bold text-slate-900 mb-4">Katalog Aktif saat ini</h2>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <h2 className="text-lg font-bold text-slate-900 mb-4">Katalog Produk per Kategori</h2>
+                            <div className="space-y-6">
                                 {products.length === 0 ? (
-                                    <p className="text-sm text-slate-400 col-span-2 text-center py-8">Belum ada item produk terdaftar di database.</p>
+                                    <p className="text-sm text-slate-400 text-center py-8">Belum ada item produk terdaftar di database.</p>
                                 ) : (
-                                    products.map((prod) => (
-                                        <div key={prod.id} className={`flex gap-4 p-3 border rounded-xl transition-all ${prod.isActive ? 'border-slate-100 hover:shadow-md' : 'border-red-100 bg-red-50/20 opacity-75'}`}>
-                                            <div className="relative flex-shrink-0">
-                                                <img src={prod.img} alt={prod.name} className={`w-16 h-16 object-cover rounded-lg bg-slate-100 border ${!prod.isActive && 'grayscale'}`} />
-                                                {!prod.isActive && <div className="absolute inset-0 bg-black/40 text-[9px] text-white font-black flex items-center justify-center rounded-lg">SUSPENDED</div>}
-                                            </div>
-                                            <div className="flex-1 min-w-0 flex flex-col justify-between">
-                                                <div>
-                                                    <h4 className="font-bold text-sm text-slate-900 truncate">{prod.name}</h4>
-                                                    <p className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-500">{prod.category || 'Makanan'}</p>
-                                                    <p className="text-xs text-slate-600 font-semibold mt-0.5">Rp {prod.price.toLocaleString('id-ID')}</p>
+                                    productsByCategory.map(({ category, products: categoryProducts }) => (
+                                            <section key={category} className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4">
+                                                <div className="mb-4">
+                                                    <h3 className="text-sm font-black uppercase tracking-wide text-slate-900">{category}</h3>
+                                                    <p className="text-xs font-medium text-slate-400">{categoryProducts.length} produk</p>
                                                 </div>
-                                                <div className="flex gap-1.5 mt-2 flex-wrap">
-                                                    {/* TOMBOL TOGGLE SUSPEND / AKTIFKAN */}
-                                                    <button 
-                                                        type="button" 
-                                                        onClick={() => handleToggleSuspend(prod.id, prod.isActive ?? true)} 
-                                                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-colors ${prod.isActive ? 'text-amber-600 bg-amber-50 border-amber-200 hover:bg-amber-100' : 'text-emerald-600 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`}
-                                                    >
-                                                        {prod.isActive ? '⏸️ Suspend' : '▶️ Aktifkan'}
-                                                    </button>
-                                                    <button onClick={() => handleStartEdit(prod)} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">Edit</button>
-                                                    <button onClick={() => handleDeleteProduct(prod.id)} className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg border border-red-100">Hapus</button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))
+
+                                                {categoryProducts.length === 0 ? (
+                                                    <p className="rounded-xl border border-dashed border-slate-200 bg-white py-6 text-center text-xs font-medium text-slate-400">Belum ada produk pada kategori ini.</p>
+                                                ) : (
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                        {categoryProducts.map((product) => (
+                                                            <div key={product.id} className={`flex gap-4 p-3 border rounded-xl bg-white transition-all ${product.isActive ? 'border-slate-100 hover:shadow-md' : 'border-red-100 bg-red-50/20 opacity-75'}`}>
+                                                                <div className="relative flex-shrink-0">
+                                                                    <img src={product.img} alt={product.name} className={`w-16 h-16 object-cover rounded-lg bg-slate-100 border ${!product.isActive && 'grayscale'}`} />
+                                                                    {!product.isActive && <div className="absolute inset-0 bg-black/40 text-[9px] text-white font-black flex items-center justify-center rounded-lg">SUSPENDED</div>}
+                                                                </div>
+                                                                <div className="flex-1 min-w-0 flex flex-col justify-between">
+                                                                    <div>
+                                                                        <h4 className="font-bold text-sm text-slate-900 truncate">{product.name}</h4>
+                                                                        <p className="text-xs text-slate-600 font-semibold mt-0.5">Rp {product.price.toLocaleString('id-ID')}</p>
+                                                                        <p className="mt-1 text-[10px] font-bold uppercase text-slate-400">{product.isActive ? 'Aktif' : 'Suspend'}</p>
+                                                                    </div>
+                                                                    <div className="flex gap-1.5 mt-2 flex-wrap">
+                                                                        {/* eslint-disable-next-line react-hooks/refs */}
+                                                                        <button type="button" onClick={() => handleToggleSuspend(product.id, product.isActive ?? true)} className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-colors ${product.isActive ? 'text-amber-600 bg-amber-50 border-amber-200 hover:bg-amber-100' : 'text-emerald-600 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`}>
+                                                                            {product.isActive ? 'Suspend' : 'Aktifkan'}
+                                                                        </button>
+                                                                        <button onClick={() => handleStartEdit(product)} className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">Edit</button>
+                                                                        <button onClick={() => handleDeleteProduct(product.id)} className="text-[10px] font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-lg border border-red-100">Hapus</button>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </section>
+                                        ))
                                 )}
                             </div>
                         </div>
