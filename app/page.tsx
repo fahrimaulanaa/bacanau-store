@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import Link from 'next/link';
@@ -10,6 +10,7 @@ interface Product {
   name: string;
   price: number;
   img: string;
+  category?: string;
   isActive?: boolean;
 }
 
@@ -30,7 +31,7 @@ export default function Home() {
   });
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [cartBump, setCartBump] = useState<boolean>(false);
-  const showPreorderNotification = true;
+  const [showPreorderNotification, setShowPreorderNotification] = useState<boolean>(true);
 
   // 1. REAL-TIME LISTENER: Ambil produk dari Firestore secara Live
   useEffect(() => {
@@ -43,6 +44,7 @@ export default function Home() {
           name: data.name || data.nama_produk || data.nama,
           price: Number(data.price || data.harga_produk || data.harga || 0),
           img: data.img || data.url_gambar || data.gambar,
+          category: data.category || data.kategori || 'Makanan',
           isActive: data.isActive !== undefined ? data.isActive : true, 
         };
       }) as Product[];
@@ -98,6 +100,16 @@ export default function Home() {
 
   const subTotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const totalItemsInCart = cart.reduce((total, item) => total + item.quantity, 0);
+  const productsByCategory = useMemo(() => {
+    const grouped = new Map<string, Product[]>();
+
+    products.forEach((product) => {
+      const category = product.category || 'Makanan';
+      grouped.set(category, [...(grouped.get(category) || []), product]);
+    });
+
+    return Array.from(grouped.entries()).map(([category, items]) => ({ category, items }));
+  }, [products]);
   
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans">
@@ -105,21 +117,38 @@ export default function Home() {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl">
             <div className="p-6 sm:p-8">
-              <div className="mb-5 flex justify-center">
+              <div className="mb-5 flex items-start justify-between gap-4">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
                   <span className="text-2xl font-black">!</span>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPreorderNotification(false)}
+                  aria-label="Tutup notifikasi pre-order"
+                  className="rounded-full px-2 py-1 text-3xl leading-none text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900"
+                >
+                  &times;
+                </button>
               </div>
 
               <p className="text-center text-sm font-black uppercase tracking-wide text-amber-600">Info Pre-order</p>
               <h2 className="mt-2 text-center text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
-                PRE ORDER DIBUKA KEMBALI
+                Pre-order Bacanau Store
               </h2>
-              <p className="mt-4 text-center text-lg font-bold leading-7 text-slate-700">
-                Sabtu 30 Mei 2026
-                <br />
-                Pukul 15:00 WIB
+              <p className="mt-4 text-center text-base leading-7 text-slate-600">
+                Pre-order dibuka mulai tanggal <strong>29 Mei</strong> hingga <strong>02 Juni 2026</strong>. Pengiriman pesanan
+                ke vendor dimulai <strong>2 Juni 2026 pukul 13:00 WIB</strong>.
+                Pengambilan atau pengiriman diperkirakan pada tanggal <strong>4 - 5 Juni 2026</strong>.
               </p>
+            </div>
+            <div className="border-t border-slate-100 p-6 sm:p-8">
+              <button
+                type="button"
+                onClick={() => setShowPreorderNotification(false)}
+                className="w-full rounded-xl bg-amber-500 px-4 py-3 text-sm font-black uppercase tracking-wide text-white transition-colors hover:bg-amber-600"
+              >
+                Mengerti
+              </button>
             </div>
           </div>
         </div>
@@ -166,18 +195,28 @@ export default function Home() {
             <p className="text-gray-500 font-medium">Belum ada produk aktif di database.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-            {products.map((item) => (
-              <div key={item.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-shadow duration-300">
-                <img src={item.img} alt={item.name} className="w-full h-48 sm:h-64 object-cover" />
-                <div className="p-4 sm:p-5">
-                  <h3 className="font-semibold text-sm sm:text-base mb-1 truncate">{item.name}</h3>
-                  <p className="text-slate-600 text-sm mb-4">Rp {item.price.toLocaleString('id-ID')}</p>
-                  <button onClick={() => addToCart(item)} className="w-full bg-slate-900 hover:bg-slate-800 text-white py-2 rounded-xl text-sm font-medium transition-colors">
-                    Tambah
-                  </button>
+          <div className="space-y-10">
+            {productsByCategory.map(({ category, items }) => (
+              <section key={category}>
+                <div className="mb-4 flex items-center gap-3">
+                  <h2 className="text-xl font-black tracking-tight text-slate-950">{category}</h2>
+                  <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs font-bold text-slate-600">{items.length} produk</span>
                 </div>
-              </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                  {items.map((item) => (
+                    <div key={item.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-lg transition-shadow duration-300">
+                      <img src={item.img} alt={item.name} className="w-full h-48 sm:h-64 object-cover" />
+                      <div className="p-4 sm:p-5">
+                        <h3 className="font-semibold text-sm sm:text-base mb-1 truncate">{item.name}</h3>
+                        <p className="text-slate-600 text-sm mb-4">Rp {item.price.toLocaleString('id-ID')}</p>
+                        <button onClick={() => addToCart(item)} className="w-full bg-slate-900 hover:bg-slate-800 text-white py-2 rounded-xl text-sm font-medium transition-colors">
+                          Tambah
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         )}

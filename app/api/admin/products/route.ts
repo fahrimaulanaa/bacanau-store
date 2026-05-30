@@ -54,8 +54,9 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const name = String(formData.get('name') || '').trim();
     const price = Number(String(formData.get('price') || '').replace(/[^0-9]/g, ''));
+    const category = String(formData.get('category') || 'Makanan').trim();
 
-    if (!name || !Number.isFinite(price) || price <= 0) {
+    if (!name || !category || !Number.isFinite(price) || price <= 0) {
       return NextResponse.json({ message: 'Data produk tidak valid.' }, { status: 400 });
     }
 
@@ -68,6 +69,7 @@ export async function POST(request: Request) {
       name,
       price,
       img,
+      category,
       isActive: true,
       createdBy: admin.email || admin.uid,
       createdAt: FieldValue.serverTimestamp(),

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from '../../lib/firebase'; 
 import imageCompression from 'browser-image-compression';
@@ -49,6 +49,7 @@ interface Product {
     name: string;
     price: number;
     img: string;
+    category?: string;
     isActive?: boolean; // Properti untuk status aktif/suspend produk
 }
 
@@ -62,6 +63,8 @@ interface Voucher {
 }
 
 const DASHBOARD_COLORS = ['#0f172a', '#ef4444', '#3b82f6', '#10b981', '#f59e0b'];
+const DEFAULT_PRODUCT_CATEGORIES = ['Makanan', 'Merchandise'];
+const ADMIN_REFRESH_COOLDOWN_MS = 60_000;
 
 function formatCurrency(value: number) {
     return `Rp ${value.toLocaleString('id-ID')}`;
@@ -112,10 +115,14 @@ export default function AdminPage() {
     const [hasProductsSnapshot, setHasProductsSnapshot] = useState<boolean>(false);
     const [hasVouchersSnapshot, setHasVouchersSnapshot] = useState<boolean>(false);
     const [liveError, setLiveError] = useState<boolean>(false);
+    const [refreshingAdminData, setRefreshingAdminData] = useState<boolean>(false);
+    const lastAdminRefreshAtRef = useRef<number>(0);
 
     // Form States Tambah/Edit Produk
     const [prodName, setProdName] = useState<string>('');
     const [prodPrice, setProdPrice] = useState<string>('');
+    const [prodCategory, setProdCategory] = useState<string>('Makanan');
+    const [newProductCategory, setNewProductCategory] = useState<string>('');
     const [prodImg, setProdImg] = useState<string>('');
     const [prodImageFile, setProdImageFile] = useState<File | null>(null);
     const [savingProduct, setSavingProduct] = useState<boolean>(false);
@@ -137,6 +144,17 @@ export default function AdminPage() {
 
         return prodImg;
     }, [prodImageFile, prodImg]);
+
+    const productCategoryOptions = useMemo(() => {
+        const categorySet = new Set(DEFAULT_PRODUCT_CATEGORIES);
+        products.forEach((product) => {
+            const category = (product.category || '').trim();
+            if (category) categorySet.add(category);
+        });
+        const selectedCategory = prodCategory.trim();
+        if (selectedCategory) categorySet.add(selectedCategory);
+        return Array.from(categorySet);
+    }, [prodCategory, products]);
 
     useEffect(() => {
         return () => {
@@ -160,6 +178,7 @@ export default function AdminPage() {
     const fetchAdminData = useCallback(async (options: { silent?: boolean } = {}) => {
         if (!auth.currentUser) return;
 
+        setRefreshingAdminData(true);
         if (!options.silent) {
             setHasOrdersSnapshot(false);
             setHasProductsSnapshot(false);
@@ -190,6 +209,7 @@ export default function AdminPage() {
             setProducts(productList.map((product) => ({
                 ...product,
                 price: Number(product.price) || 0,
+                category: product.category || 'Makanan',
                 isActive: product.isActive !== undefined ? product.isActive : true,
             })));
             setVouchers(voucherList.map((voucher) => {
@@ -207,8 +227,11 @@ export default function AdminPage() {
             setHasOrdersSnapshot(true);
             setHasProductsSnapshot(true);
             setHasVouchersSnapshot(true);
+            lastAdminRefreshAtRef.current = Date.now();
         } catch {
             setLiveError(true);
+        } finally {
+            setRefreshingAdminData(false);
         }
     }, [getAdminHeaders]);
 
@@ -242,9 +265,10 @@ export default function AdminPage() {
         if (!user) return;
 
         const refreshAdminData = () => {
+            const now = Date.now();
+            if (now - lastAdminRefreshAtRef.current < ADMIN_REFRESH_COOLDOWN_MS) return;
             void fetchAdminData({ silent: true });
         };
-        const intervalId = window.setInterval(refreshAdminData, 5000);
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
                 refreshAdminData();
@@ -254,7 +278,6 @@ export default function AdminPage() {
         document.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
-            window.clearInterval(intervalId);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [user, fetchAdminData]);
@@ -341,13 +364,15 @@ Terima Kasih`;
     // FUNGSI PRODUK: Save, Edit, Delete
     const handleSaveProduct = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!prodName || !prodPrice || (!prodImg && !prodImageFile)) return;
+        const normalizedCategory = prodCategory.trim();
+        if (!prodName || !prodPrice || !normalizedCategory || (!prodImg && !prodImageFile)) return;
 
         setSavingProduct(true);
         try {
             const formData = new FormData();
             formData.append('name', prodName);
             formData.append('price', prodPrice);
+            formData.append('category', normalizedCategory);
             formData.append('img', prodImg);
             
             if (prodImageFile) {
@@ -369,7 +394,7 @@ Terima Kasih`;
 
             if (!response.ok) throw new Error('PRODUCT_SAVE_FAILED');
             alert(editingProductId ? "Produk berhasil diperbarui!" : "Produk baru berhasil ditambahkan!");
-            setProdName(''); setProdPrice(''); setProdImg(''); setProdImageFile(null); setEditingProductId(null);
+            setProdName(''); setProdPrice(''); setProdCategory('Makanan'); setNewProductCategory(''); setProdImg(''); setProdImageFile(null); setEditingProductId(null);
             await fetchAdminData();
         } catch {
             alert("Gagal menyimpan data produk. Pastikan bucket Supabase 'produk' sudah dibuat dan policy upload publik/admin sudah aktif.");
@@ -397,12 +422,19 @@ Terima Kasih`;
         }
     };
 
+    const handleAddProductCategory = () => {
+        const normalizedCategory = newProductCategory.trim();
+        if (!normalizedCategory) return;
+        setProdCategory(normalizedCategory);
+        setNewProductCategory('');
+    };
+
     const handleStartEdit = (product: Product) => {
-        setEditingProductId(product.id); setProdName(product.name); setProdPrice(product.price.toString()); setProdImg(product.img); setProdImageFile(null);
+        setEditingProductId(product.id); setProdName(product.name); setProdPrice(product.price.toString()); setProdCategory(product.category || 'Makanan'); setNewProductCategory(''); setProdImg(product.img); setProdImageFile(null);
     };
 
     const handleCancelEdit = () => {
-        setEditingProductId(null); setProdName(''); setProdPrice(''); setProdImg(''); setProdImageFile(null);
+        setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCategory('Makanan'); setNewProductCategory(''); setProdImg(''); setProdImageFile(null);
     };
 
     const handleDeleteProduct = async (productId: string) => {
@@ -574,6 +606,7 @@ Terima Kasih`;
         const productRows = products.map((product) => ({
             'Product ID': product.id,
             'Nama Produk': product.name,
+            'Kategori': product.category || 'Makanan',
             'Harga': product.price,
             'Status Produk': (product.isActive ?? true) ? 'Aktif' : 'Suspend',
             'URL Gambar': product.img,
@@ -716,6 +749,7 @@ Terima Kasih`;
         const productsTable = products.map((product) => [
             product.id,
             product.name,
+            product.category || 'Makanan',
             formatCurrency(product.price),
             (product.isActive ?? true) ? 'Aktif' : 'Suspend',
             product.img,
@@ -723,8 +757,8 @@ Terima Kasih`;
 
         autoTable(pdf, {
             startY: getNextTableY(80),
-            head: [['Product ID', 'Nama Produk', 'Harga', 'Status', 'URL Gambar']],
-            body: productsTable.length ? productsTable : [['-', 'Tidak ada produk', '-', '-', '-']],
+            head: [['Product ID', 'Nama Produk', 'Kategori', 'Harga', 'Status', 'URL Gambar']],
+            body: productsTable.length ? productsTable : [['-', 'Tidak ada produk', '-', '-', '-', '-']],
             styles: { fontSize: 8 },
             headStyles: { fillColor: [15, 23, 42] },
             columnStyles: {
@@ -847,7 +881,7 @@ Terima Kasih`;
         return remaining > 0 ? `${visibleNames.join(', ')} +${remaining} lainnya` : visibleNames.join(', ');
     };
     const liveStatusLabel = liveStatus === 'connected'
-        ? 'Live Connected'
+        ? (refreshingAdminData ? 'Menyegarkan...' : 'Data Siap')
         : liveStatus === 'error'
             ? 'Koneksi Bermasalah'
             : 'Menghubungkan...';
@@ -936,6 +970,15 @@ Terima Kasih`;
                             <span>{liveStatusLabel}</span>
                         </div>
 
+                        <button
+                            type="button"
+                            onClick={() => void fetchAdminData({ silent: true })}
+                            disabled={refreshingAdminData}
+                            className="text-xs font-bold text-slate-700 bg-white/70 hover:bg-white/90 px-3 py-2 rounded-xl border border-white/60 transition-colors disabled:text-slate-400 disabled:cursor-wait"
+                        >
+                            Refresh Data
+                        </button>
+
                         <button 
                             onClick={handleLogout} 
                             className="text-xs font-bold text-red-600 hover:bg-red-50 px-3 py-2 rounded-xl border border-red-200 transition-colors"
@@ -988,6 +1031,9 @@ Terima Kasih`;
                             </button>
                         </div>
                         <div className="mt-4 grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => { void fetchAdminData({ silent: true }); setIsAdminMenuOpen(false); }} disabled={refreshingAdminData} className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-3 text-xs font-bold text-slate-700 disabled:text-slate-400">
+                                Refresh Data
+                            </button>
                             <button type="button" onClick={() => { handleExportExcel(); setIsAdminMenuOpen(false); }} disabled={!canExport} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs font-bold text-emerald-700 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">
                                 Export Excel
                             </button>
@@ -1298,6 +1344,35 @@ Terima Kasih`;
                                 <input type="text" placeholder="Nama Produk" className="w-full border p-3 rounded-xl text-sm" value={prodName} onChange={(e) => setProdName(e.target.value)} required />
                                 <input type="number" placeholder="Harga (Rupiah)" className="w-full border p-3 rounded-xl text-sm" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} required />
                                 <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                    <label className="block text-xs font-bold uppercase text-slate-500">Kategori Produk</label>
+                                    <select
+                                        className="w-full border border-slate-200 bg-white p-3 rounded-xl text-sm"
+                                        value={prodCategory}
+                                        onChange={(e) => setProdCategory(e.target.value)}
+                                        required
+                                    >
+                                        {productCategoryOptions.map((category) => (
+                                            <option key={category} value={category}>{category}</option>
+                                        ))}
+                                    </select>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            placeholder="Tambah kategori baru"
+                                            className="min-w-0 flex-1 border border-slate-200 bg-white p-3 rounded-xl text-sm"
+                                            value={newProductCategory}
+                                            onChange={(e) => setNewProductCategory(e.target.value)}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={handleAddProductCategory}
+                                            className="shrink-0 rounded-xl bg-slate-900 px-4 text-xs font-bold text-white"
+                                        >
+                                            Tambah
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                                     <label className="block text-xs font-bold uppercase text-slate-500">Gambar Produk</label>
                                     <input
                                         type="file"
@@ -1354,6 +1429,7 @@ Terima Kasih`;
                                             <div className="flex-1 min-w-0 flex flex-col justify-between">
                                                 <div>
                                                     <h4 className="font-bold text-sm text-slate-900 truncate">{prod.name}</h4>
+                                                    <p className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-500">{prod.category || 'Makanan'}</p>
                                                     <p className="text-xs text-slate-600 font-semibold mt-0.5">Rp {prod.price.toLocaleString('id-ID')}</p>
                                                 </div>
                                                 <div className="flex gap-1.5 mt-2 flex-wrap">

@@ -63,15 +63,17 @@ export async function PATCH(
       const formData = await request.formData();
       const name = String(formData.get('name') || '').trim();
       const price = Number(String(formData.get('price') || '').replace(/[^0-9]/g, ''));
+      const category = String(formData.get('category') || 'Makanan').trim();
       const img = String(formData.get('img') || '');
       const uploadedUrl = name ? await uploadProductImage(formData, name, id) : null;
 
-      if (!name || !Number.isFinite(price) || price <= 0 || (!img && !uploadedUrl)) {
+      if (!name || !category || !Number.isFinite(price) || price <= 0 || (!img && !uploadedUrl)) {
         return NextResponse.json({ message: 'Data produk tidak valid.' }, { status: 400 });
       }
 
       updateData.name = name;
       updateData.price = price;
+      updateData.category = category;
       updateData.img = uploadedUrl || img;
     } else {
       const body = await request.json();
