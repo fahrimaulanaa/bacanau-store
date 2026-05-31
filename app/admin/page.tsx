@@ -63,9 +63,19 @@ interface Voucher {
     allowedProductIds?: string[];
 }
 
+interface DatabaseStatus {
+    trackedReadsToday: number;
+    dailyReadLimit: number;
+    remainingReads: number;
+    usagePercent: number;
+    lastAdminReadEstimate: number;
+    scope: string;
+}
+
 const DASHBOARD_COLORS = ['#0f172a', '#ef4444', '#3b82f6', '#10b981', '#f59e0b'];
 const DEFAULT_PRODUCT_CATEGORIES = ['Makanan', 'Merchandise'];
 const ADMIN_REFRESH_COOLDOWN_MS = 60_000;
+const ADMIN_CASHFLOW_TOKEN = 'fundrekaya';
 
 function formatCurrency(value: number) {
     return `Rp ${value.toLocaleString('id-ID')}`;
@@ -112,7 +122,7 @@ export default function AdminPage() {
     const [loginError, setLoginError] = useState<string>('');
 
     // Dashboard States
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products' | 'vouchers'>('dashboard');
+    const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products' | 'vouchers' | 'finance'>('dashboard');
     const [isAdminMenuOpen, setIsAdminMenuOpen] = useState<boolean>(false);
     const [orders, setOrders] = useState<Order[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
@@ -122,6 +132,7 @@ export default function AdminPage() {
     const [hasVouchersSnapshot, setHasVouchersSnapshot] = useState<boolean>(false);
     const [liveError, setLiveError] = useState<boolean>(false);
     const [refreshingAdminData, setRefreshingAdminData] = useState<boolean>(false);
+    const [databaseStatus, setDatabaseStatus] = useState<DatabaseStatus | null>(null);
     const lastAdminRefreshAtRef = useRef<number>(0);
 
     // Form States Tambah/Edit Produk
@@ -140,6 +151,15 @@ export default function AdminPage() {
     const [voucherProductIds, setVoucherProductIds] = useState<string[]>([]);
     const [savingVoucher, setSavingVoucher] = useState<boolean>(false);
     const [editingVoucherId, setEditingVoucherId] = useState<string | null>(null);
+
+    // Form States Cashflow (Penjualan Lama)
+    const [cashflowProductName, setCashflowProductName] = useState<string>('');
+    const [cashflowQuantity, setCashflowQuantity] = useState<string>('1');
+    const [cashflowUnitPrice, setCashflowUnitPrice] = useState<string>('');
+    const [cashflowSoldAt, setCashflowSoldAt] = useState<string>(() => new Date().toISOString().slice(0, 10));
+    const [cashflowNote, setCashflowNote] = useState<string>('');
+    const [cashflowSaving, setCashflowSaving] = useState<boolean>(false);
+    const [cashflowError, setCashflowError] = useState<string>('');
 
     // State Modal Bukti Pembayaran
     const [selectedProofUrl, setSelectedProofUrl] = useState<string | null>(null);
@@ -239,6 +259,7 @@ export default function AdminPage() {
             setHasOrdersSnapshot(true);
             setHasProductsSnapshot(true);
             setHasVouchersSnapshot(true);
+            setDatabaseStatus(data.databaseStatus || null);
             lastAdminRefreshAtRef.current = Date.now();
         } catch {
             setLiveError(true);
@@ -255,6 +276,7 @@ export default function AdminPage() {
                 setOrders([]);
                 setProducts([]);
                 setVouchers([]);
+                setDatabaseStatus(null);
                 setHasOrdersSnapshot(false);
                 setHasProductsSnapshot(false);
                 setHasVouchersSnapshot(false);
@@ -562,7 +584,42 @@ Terima Kasih`;
         }
     };
 
-    const handleSelectAdminTab = (tab: 'dashboard' | 'orders' | 'products' | 'vouchers') => {
+    const handleSaveCashflowEntry = async (event: React.FormEvent) => {
+        event.preventDefault();
+        setCashflowSaving(true);
+        setCashflowError('');
+
+        try {
+            const response = await fetch('/api/cashflow', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-cashflow-token': ADMIN_CASHFLOW_TOKEN,
+                },
+                body: JSON.stringify({
+                    productName: cashflowProductName,
+                    quantity: Number(cashflowQuantity),
+                    unitPrice: Number(cashflowUnitPrice),
+                    soldAt: cashflowSoldAt,
+                    note: cashflowNote,
+                }),
+            });
+
+            if (!response.ok) throw new Error('CASHFLOW_SAVE_FAILED');
+            alert('Data penjualan lama berhasil disimpan.');
+            setCashflowProductName('');
+            setCashflowQuantity('1');
+            setCashflowUnitPrice('');
+            setCashflowNote('');
+            setCashflowSoldAt(new Date().toISOString().slice(0, 10));
+        } catch {
+            setCashflowError('Gagal menyimpan data penjualan lama.');
+        } finally {
+            setCashflowSaving(false);
+        }
+    };
+
+    const handleSelectAdminTab = (tab: 'dashboard' | 'orders' | 'products' | 'vouchers' | 'finance') => {
         setActiveTab(tab);
         setIsAdminMenuOpen(false);
     };
@@ -1066,6 +1123,9 @@ Terima Kasih`;
                             <button onClick={() => handleSelectAdminTab('vouchers')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'vouchers' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
                                 Kelola Voucher ({vouchers.length})
                             </button>
+                            <button onClick={() => handleSelectAdminTab('finance')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'finance' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                                Tools Keuangan
+                            </button>
                         </div>
                         <div className="mt-4 grid grid-cols-2 gap-2">
                             <button type="button" onClick={() => { void fetchAdminData({ silent: true }); setIsAdminMenuOpen(false); }} disabled={refreshingAdminData} className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-3 text-xs font-bold text-slate-700 disabled:text-slate-400">
@@ -1102,6 +1162,9 @@ Terima Kasih`;
                     <button onClick={() => handleSelectAdminTab('vouchers')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'vouchers' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         🎟️ Kelola Voucher ({vouchers.length})
                     </button>
+                    <button onClick={() => handleSelectAdminTab('finance')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'finance' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                        💰 Tools Keuangan
+                    </button>
                 </div>
 
                 {activeTab === 'dashboard' && (
@@ -1126,6 +1189,35 @@ Terima Kasih`;
                                 <p className="text-xs uppercase font-bold text-slate-400">Produk Aktif</p>
                                 <p className="text-3xl font-black text-slate-900 mt-3">{dashboardData.activeProducts}/{dashboardData.totalProducts}</p>
                                 <p className="text-sm text-slate-500 mt-2">Katalog aktif dan yang sedang disuspend.</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                                <div>
+                                    <p className="text-xs uppercase font-bold text-slate-400">Status Database Firestore</p>
+                                    <h2 className="text-xl font-black text-slate-900 mt-1">
+                                        {databaseStatus
+                                            ? `${databaseStatus.remainingReads.toLocaleString('id-ID')} / ${databaseStatus.dailyReadLimit.toLocaleString('id-ID')} read tersisa`
+                                            : 'Menunggu data penggunaan'}
+                                    </h2>
+                                    <p className="text-xs text-slate-500 mt-2">
+                                        {databaseStatus?.scope || 'Estimasi akan muncul setelah data admin berhasil dimuat.'}
+                                    </p>
+                                </div>
+                                <div className="min-w-full lg:min-w-[320px]">
+                                    <div className="flex items-center justify-between text-xs font-bold text-slate-500 mb-2">
+                                        <span>{databaseStatus ? `${databaseStatus.usagePercent.toFixed(1)}% terpakai` : '0% terpakai'}</span>
+                                        <span>Load terakhir: {databaseStatus?.lastAdminReadEstimate?.toLocaleString('id-ID') || 0} read</span>
+                                    </div>
+                                    <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                                        <div
+                                            className={`h-full rounded-full ${databaseStatus && databaseStatus.usagePercent >= 80 ? 'bg-red-500' : databaseStatus && databaseStatus.usagePercent >= 60 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                            style={{ width: `${databaseStatus ? Math.min(databaseStatus.usagePercent, 100) : 0}%` }}
+                                        />
+                                    </div>
+                                    <p className="text-[11px] text-slate-400 mt-2">Limit default bisa diubah lewat env `FIRESTORE_DAILY_READ_LIMIT`.</p>
+                                </div>
                             </div>
                         </div>
 
@@ -1632,6 +1724,61 @@ Terima Kasih`;
                                 )}
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {/* TAB 4: TOOLS KEUANGAN */}
+                {activeTab === 'finance' && (
+                    <div className="grid grid-cols-1 gap-6">
+                        <form onSubmit={handleSaveCashflowEntry} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm max-w-2xl">
+                            <h2 className="text-lg font-bold text-slate-900 mb-4">Input Penjualan Lama</h2>
+                            <div className="space-y-3">
+                                <input
+                                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                                    placeholder="Nama produk"
+                                    value={cashflowProductName}
+                                    onChange={(event) => setCashflowProductName(event.target.value)}
+                                    required
+                                />
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <input
+                                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                                        type="number"
+                                        min="1"
+                                        placeholder="Jumlah"
+                                        value={cashflowQuantity}
+                                        onChange={(event) => setCashflowQuantity(event.target.value)}
+                                        required
+                                    />
+                                    <input
+                                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                                        type="number"
+                                        min="0"
+                                        placeholder="Harga satuan"
+                                        value={cashflowUnitPrice}
+                                        onChange={(event) => setCashflowUnitPrice(event.target.value)}
+                                        required
+                                    />
+                                </div>
+                                <input
+                                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                                    type="date"
+                                    value={cashflowSoldAt}
+                                    onChange={(event) => setCashflowSoldAt(event.target.value)}
+                                    required
+                                />
+                                <textarea
+                                    className="min-h-20 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                                    placeholder="Catatan"
+                                    value={cashflowNote}
+                                    onChange={(event) => setCashflowNote(event.target.value)}
+                                />
+                                <button type="submit" disabled={cashflowSaving} className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white disabled:bg-slate-400">
+                                    {cashflowSaving ? 'Menyimpan...' : 'Simpan'}
+                                </button>
+                            </div>
+                            {cashflowError && <p className="mt-3 text-xs font-bold text-red-600">{cashflowError}</p>}
+                        </form>
                     </div>
                 )}
             </main>
