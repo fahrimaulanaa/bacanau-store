@@ -8,6 +8,7 @@ import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { getDefaultCostPrice, resolveCostPrice } from '../../lib/product-cost';
 import {
     Bar,
     BarChart,
@@ -26,6 +27,7 @@ interface OrderItem {
     name: string;
     price: number;
     quantity: number;
+    costPrice?: number;
 }
 
 interface Order {
@@ -49,6 +51,7 @@ interface Product {
     id: string;
     name: string;
     price: number;
+    costPrice?: number;
     img: string;
     category?: string;
     isActive?: boolean; // Properti untuk status aktif/suspend produk
@@ -138,6 +141,7 @@ export default function AdminPage() {
     // Form States Tambah/Edit Produk
     const [prodName, setProdName] = useState<string>('');
     const [prodPrice, setProdPrice] = useState<string>('');
+    const [prodCostPrice, setProdCostPrice] = useState<string>('');
     const [prodCategory, setProdCategory] = useState<string>('Makanan');
     const [newProductCategory, setNewProductCategory] = useState<string>('');
     const [prodImg, setProdImg] = useState<string>('');
@@ -156,6 +160,7 @@ export default function AdminPage() {
     const [cashflowProductName, setCashflowProductName] = useState<string>('');
     const [cashflowQuantity, setCashflowQuantity] = useState<string>('1');
     const [cashflowUnitPrice, setCashflowUnitPrice] = useState<string>('');
+    const [cashflowUnitCost, setCashflowUnitCost] = useState<string>('');
     const [cashflowSoldAt, setCashflowSoldAt] = useState<string>(() => new Date().toISOString().slice(0, 10));
     const [cashflowNote, setCashflowNote] = useState<string>('');
     const [cashflowSaving, setCashflowSaving] = useState<boolean>(false);
@@ -241,6 +246,7 @@ export default function AdminPage() {
             setProducts(productList.map((product) => ({
                 ...product,
                 price: Number(product.price) || 0,
+                costPrice: resolveCostPrice(product),
                 category: normalizeProductCategory(product.category),
                 isActive: product.isActive !== undefined ? product.isActive : true,
             })));
@@ -399,13 +405,15 @@ Terima Kasih`;
     const handleSaveProduct = async (e: React.FormEvent) => {
         e.preventDefault();
         const normalizedCategory = prodCategory.trim();
-        if (!prodName || !prodPrice || !normalizedCategory || (!prodImg && !prodImageFile)) return;
+        const parsedCostPrice = Number(prodCostPrice.replace(/[^0-9]/g, ''));
+        if (!prodName || !prodPrice || !Number.isFinite(parsedCostPrice) || parsedCostPrice < 0 || !normalizedCategory || (!prodImg && !prodImageFile)) return;
 
         setSavingProduct(true);
         try {
             const formData = new FormData();
             formData.append('name', prodName);
             formData.append('price', prodPrice);
+            formData.append('costPrice', prodCostPrice);
             formData.append('category', normalizedCategory);
             formData.append('img', prodImg);
             
@@ -428,7 +436,7 @@ Terima Kasih`;
 
             if (!response.ok) throw new Error('PRODUCT_SAVE_FAILED');
             alert(editingProductId ? "Produk berhasil diperbarui!" : "Produk baru berhasil ditambahkan!");
-            setProdName(''); setProdPrice(''); setProdCategory('Makanan'); setNewProductCategory(''); setProdImg(''); setProdImageFile(null); setEditingProductId(null);
+            setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdCategory('Makanan'); setNewProductCategory(''); setProdImg(''); setProdImageFile(null); setEditingProductId(null);
             await fetchAdminData();
         } catch {
             alert("Gagal menyimpan data produk. Pastikan bucket Supabase 'produk' sudah dibuat dan policy upload publik/admin sudah aktif.");
@@ -464,11 +472,11 @@ Terima Kasih`;
     };
 
     const handleStartEdit = (product: Product) => {
-        setEditingProductId(product.id); setProdName(product.name); setProdPrice(product.price.toString()); setProdCategory(product.category || 'Makanan'); setNewProductCategory(''); setProdImg(product.img); setProdImageFile(null);
+        setEditingProductId(product.id); setProdName(product.name); setProdPrice(product.price.toString()); setProdCostPrice(resolveCostPrice(product).toString()); setProdCategory(product.category || 'Makanan'); setNewProductCategory(''); setProdImg(product.img); setProdImageFile(null);
     };
 
     const handleCancelEdit = () => {
-        setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCategory('Makanan'); setNewProductCategory(''); setProdImg(''); setProdImageFile(null);
+        setEditingProductId(null); setProdName(''); setProdPrice(''); setProdCostPrice(''); setProdCategory('Makanan'); setNewProductCategory(''); setProdImg(''); setProdImageFile(null);
     };
 
     const handleDeleteProduct = async (productId: string) => {
@@ -600,6 +608,7 @@ Terima Kasih`;
                     productName: cashflowProductName,
                     quantity: Number(cashflowQuantity),
                     unitPrice: Number(cashflowUnitPrice),
+                    unitCost: Number(cashflowUnitCost || getDefaultCostPrice(cashflowProductName)),
                     soldAt: cashflowSoldAt,
                     note: cashflowNote,
                 }),
@@ -610,6 +619,7 @@ Terima Kasih`;
             setCashflowProductName('');
             setCashflowQuantity('1');
             setCashflowUnitPrice('');
+            setCashflowUnitCost('');
             setCashflowNote('');
             setCashflowSoldAt(new Date().toISOString().slice(0, 10));
         } catch {
@@ -677,6 +687,8 @@ Terima Kasih`;
             'Nama Produk': product.name,
             'Kategori': product.category || 'Makanan',
             'Harga': product.price,
+            'Harga Modal': resolveCostPrice(product),
+            'Estimasi Profit per Item': product.price - resolveCostPrice(product),
             'Status Produk': (product.isActive ?? true) ? 'Aktif' : 'Suspend',
             'URL Gambar': product.img,
         }));
@@ -693,6 +705,10 @@ Terima Kasih`;
             { Label: 'Pesanan Dibatalkan', Value: dashboardData.canceledOrders },
             { Label: 'Pendapatan Kotor', Value: dashboardData.grossRevenue },
             { Label: 'Pendapatan Selesai', Value: dashboardData.completedRevenue },
+            { Label: 'Modal Kotor', Value: dashboardData.grossCost },
+            { Label: 'Modal Selesai', Value: dashboardData.completedCost },
+            { Label: 'Keuntungan Kotor', Value: dashboardData.grossProfit },
+            { Label: 'Keuntungan Bersih', Value: dashboardData.netProfit },
             { Label: 'Rata-rata Transaksi', Value: dashboardData.averageOrderValue },
         ];
 
@@ -761,6 +777,9 @@ Terima Kasih`;
             ['Total Item Terjual', String(totalItemsSold)],
             ['Pendapatan Kotor', formatCurrency(dashboardData.grossRevenue)],
             ['Pendapatan Selesai', formatCurrency(dashboardData.completedRevenue)],
+            ['Modal Kotor', formatCurrency(dashboardData.grossCost)],
+            ['Keuntungan Kotor', formatCurrency(dashboardData.grossProfit)],
+            ['Keuntungan Bersih', formatCurrency(dashboardData.netProfit)],
             ['Rata-rata Transaksi', formatCurrency(dashboardData.averageOrderValue)],
             ['Menunggu Pembayaran', String(dashboardData.pendingOrders)],
             ['Mengecek Bukti', String(dashboardData.reviewingOrders)],
@@ -862,6 +881,20 @@ Terima Kasih`;
         pdf.save(`bacanau-laporan-pesanan-${exportStamp}.pdf`);
     };
 
+    const productCostById = new Map(products.map((product) => [product.id, resolveCostPrice(product)]));
+    const productCostByName = new Map(products.map((product) => [product.name.toLowerCase(), resolveCostPrice(product)]));
+    const getOrderItemCost = (item: OrderItem) => {
+        const explicitCost = Number(item.costPrice);
+        if (Number.isFinite(explicitCost) && explicitCost >= 0) return explicitCost;
+        return productCostById.get(item.id) ?? productCostByName.get(String(item.name || '').toLowerCase()) ?? getDefaultCostPrice(item.name);
+    };
+    const getOrderCost = (order: Order) => {
+        return (order.items || []).reduce((sum, item) => {
+            const quantity = Number(item.quantity) || 0;
+            return sum + (getOrderItemCost(item) * quantity);
+        }, 0);
+    };
+
     const dashboardData = (() => {
         const totalOrders = orders.length;
         const totalProducts = products.length;
@@ -876,6 +909,12 @@ Terima Kasih`;
         const completedRevenue = orders
             .filter((order) => order.status === 'Selesai (Lunas)')
             .reduce((sum, order) => sum + (Number(order.totalPayment) || 0), 0);
+        const grossCost = orders.reduce((sum, order) => sum + getOrderCost(order), 0);
+        const completedCost = orders
+            .filter((order) => order.status === 'Selesai (Lunas)')
+            .reduce((sum, order) => sum + getOrderCost(order), 0);
+        const grossProfit = grossRevenue - grossCost;
+        const netProfit = completedRevenue - completedCost;
         const averageOrderValue = totalOrders > 0 ? grossRevenue / totalOrders : 0;
 
         const statusCounts = [
@@ -913,15 +952,18 @@ Terima Kasih`;
             };
         });
 
-        const topItemsMap = orders.flatMap((order) => order.items || []).reduce<Record<string, { name: string; quantity: number; revenue: number }>>((acc, item) => {
+        const topItemsMap = orders.flatMap((order) => order.items || []).reduce<Record<string, { name: string; quantity: number; revenue: number; cost: number; profit: number }>>((acc, item) => {
             const quantity = Number(item.quantity) || 0;
             const revenue = (Number(item.price) || 0) * quantity;
-            const current = acc[item.name] || { name: item.name, quantity: 0, revenue: 0 };
+            const cost = getOrderItemCost(item) * quantity;
+            const current = acc[item.name] || { name: item.name, quantity: 0, revenue: 0, cost: 0, profit: 0 };
 
             acc[item.name] = {
                 name: item.name,
                 quantity: current.quantity + quantity,
                 revenue: current.revenue + revenue,
+                cost: current.cost + cost,
+                profit: current.profit + (revenue - cost),
             };
 
             return acc;
@@ -950,6 +992,10 @@ Terima Kasih`;
             canceledOrders,
             grossRevenue,
             completedRevenue,
+            grossCost,
+            completedCost,
+            grossProfit,
+            netProfit,
             averageOrderValue,
             statusCounts,
             paymentMethodData,
@@ -1169,7 +1215,7 @@ Terima Kasih`;
 
                 {activeTab === 'dashboard' && (
                     <div className="space-y-6">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
                             <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
                                 <p className="text-xs uppercase font-bold text-slate-400">Total Pesanan</p>
                                 <p className="text-3xl font-black text-slate-900 mt-3">{dashboardData.totalOrders}</p>
@@ -1179,6 +1225,16 @@ Terima Kasih`;
                                 <p className="text-xs uppercase font-bold text-slate-400">Pendapatan Kotor</p>
                                 <p className="text-3xl font-black text-emerald-600 mt-3">{formatCurrency(dashboardData.grossRevenue)}</p>
                                 <p className="text-sm text-slate-500 mt-2">Akumulasi total pembayaran dari semua pesanan.</p>
+                            </div>
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Keuntungan Kotor</p>
+                                <p className="text-3xl font-black text-indigo-600 mt-3">{formatCurrency(dashboardData.grossProfit)}</p>
+                                <p className="text-sm text-slate-500 mt-2">Pendapatan dikurangi estimasi modal semua pesanan.</p>
+                            </div>
+                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                                <p className="text-xs uppercase font-bold text-slate-400">Keuntungan Bersih</p>
+                                <p className="text-3xl font-black text-slate-900 mt-3">{formatCurrency(dashboardData.netProfit)}</p>
+                                <p className="text-sm text-slate-500 mt-2">Profit dari pesanan yang sudah selesai lunas.</p>
                             </div>
                             <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
                                 <p className="text-xs uppercase font-bold text-slate-400">Pesanan Perlu Dicek</p>
@@ -1296,7 +1352,7 @@ Terima Kasih`;
                                             <div key={`${item.name}-${index}`} className="flex items-center justify-between gap-4 p-3 rounded-xl bg-slate-50 border border-slate-100">
                                                 <div>
                                                     <p className="font-semibold text-slate-900">{item.name}</p>
-                                                    <p className="text-xs text-slate-500">{item.quantity} item terjual</p>
+                                                    <p className="text-xs text-slate-500">{item.quantity} item terjual - Profit {formatCurrency(item.profit)}</p>
                                                 </div>
                                                 <p className="text-sm font-bold text-slate-700">{formatCurrency(item.revenue)}</p>
                                             </div>
@@ -1472,6 +1528,7 @@ Terima Kasih`;
                             <form onSubmit={handleSaveProduct} className="space-y-4">
                                 <input type="text" placeholder="Nama Produk" className="w-full border p-3 rounded-xl text-sm" value={prodName} onChange={(e) => setProdName(e.target.value)} required />
                                 <input type="number" placeholder="Harga (Rupiah)" className="w-full border p-3 rounded-xl text-sm" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} required />
+                                <input type="number" min="0" placeholder="Harga Modal (Rupiah)" className="w-full border p-3 rounded-xl text-sm" value={prodCostPrice} onChange={(e) => setProdCostPrice(e.target.value)} required />
                                 <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                                     <label className="block text-xs font-bold uppercase text-slate-500">Kategori Produk</label>
                                     <select
@@ -1570,6 +1627,7 @@ Terima Kasih`;
                                                                     <div>
                                                                         <h4 className="font-bold text-sm text-slate-900 truncate">{product.name}</h4>
                                                                         <p className="text-xs text-slate-600 font-semibold mt-0.5">Rp {product.price.toLocaleString('id-ID')}</p>
+                                                                        <p className="text-xs text-slate-500 font-medium mt-0.5">Modal Rp {resolveCostPrice(product).toLocaleString('id-ID')}</p>
                                                                         <p className="mt-1 text-[10px] font-bold uppercase text-slate-400">{product.isActive ? 'Aktif' : 'Suspend'}</p>
                                                                     </div>
                                                                     <div className="flex gap-1.5 mt-2 flex-wrap">
@@ -1740,7 +1798,7 @@ Terima Kasih`;
                                     onChange={(event) => setCashflowProductName(event.target.value)}
                                     required
                                 />
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                     <input
                                         className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                                         type="number"
@@ -1758,6 +1816,14 @@ Terima Kasih`;
                                         value={cashflowUnitPrice}
                                         onChange={(event) => setCashflowUnitPrice(event.target.value)}
                                         required
+                                    />
+                                    <input
+                                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                                        type="number"
+                                        min="0"
+                                        placeholder="Modal satuan"
+                                        value={cashflowUnitCost}
+                                        onChange={(event) => setCashflowUnitCost(event.target.value)}
                                     />
                                 </div>
                                 <input

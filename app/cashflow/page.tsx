@@ -7,6 +7,8 @@ type CashflowItem = {
   name: string;
   quantity: number;
   revenue: number;
+  cost: number;
+  profit: number;
   source: string;
 };
 
@@ -15,6 +17,13 @@ type CashflowData = {
   summary: {
     grossRevenue: number;
     completedRevenue: number;
+    grossCost: number;
+    grossProfit: number;
+    completedCost: number;
+    completedProfit: number;
+    manualRevenue: number;
+    manualCost: number;
+    manualProfit: number;
     totalOrders: number;
     totalManualEntries: number;
     totalItemsSold: number;
@@ -25,6 +34,7 @@ type CashflowData = {
     productName?: string;
     quantity?: number;
     unitPrice?: number;
+    unitCost?: number;
     soldAt?: string;
     note?: string;
   }>;
@@ -41,16 +51,10 @@ export default function CashflowPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const totalManualRevenue = useMemo(() => {
-    return (data?.manualEntries || []).reduce((sum, entry) => (
-      sum + (Number(entry.quantity) || 0) * (Number(entry.unitPrice) || 0)
-    ), 0);
-  }, [data]);
-
   const saldoSekarang = useMemo(() => {
     if (!data) return 0;
-    return (Number(data.summary.completedRevenue) || 0) + totalManualRevenue;
-  }, [data, totalManualRevenue]);
+    return (Number(data.summary.completedRevenue) || 0) + (Number(data.summary.manualRevenue) || 0);
+  }, [data]);
 
   const fetchCashflow = async (nextToken = activeToken) => {
     if (!nextToken) return;
@@ -116,26 +120,30 @@ export default function CashflowPage() {
           </form>
         ) : (
           <>
-            <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-6">
               <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
                 <p className="text-xs font-bold uppercase text-slate-400">Pendapatan Kotor</p>
                 <p className="mt-2 text-2xl font-black text-emerald-600">{formatCurrency(data.summary.grossRevenue)}</p>
               </div>
               <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-                <p className="text-xs font-bold uppercase text-slate-400">Pendapatan Lunas</p>
-                <p className="mt-2 text-2xl font-black text-slate-900">{formatCurrency(data.summary.completedRevenue)}</p>
+                <p className="text-xs font-bold uppercase text-slate-400">Total Modal</p>
+                <p className="mt-2 text-2xl font-black text-amber-600">{formatCurrency(data.summary.grossCost)}</p>
               </div>
               <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-                <p className="text-xs font-bold uppercase text-slate-400">Saldo Sekarang</p>
-                <p className="mt-2 text-2xl font-black text-indigo-600">{formatCurrency(saldoSekarang)}</p>
+                <p className="text-xs font-bold uppercase text-slate-400">Keuntungan Kotor</p>
+                <p className="mt-2 text-2xl font-black text-indigo-600">{formatCurrency(data.summary.grossProfit)}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+                <p className="text-xs font-bold uppercase text-slate-400">Keuntungan Bersih</p>
+                <p className="mt-2 text-2xl font-black text-slate-900">{formatCurrency(data.summary.completedProfit)}</p>
               </div>
               <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
                 <p className="text-xs font-bold uppercase text-slate-400">Item Terjual</p>
                 <p className="mt-2 text-2xl font-black text-slate-900">{data.summary.totalItemsSold.toLocaleString('id-ID')}</p>
               </div>
               <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-                <p className="text-xs font-bold uppercase text-slate-400">Input Lama</p>
-                <p className="mt-2 text-2xl font-black text-slate-900">{formatCurrency(totalManualRevenue)}</p>
+                <p className="text-xs font-bold uppercase text-slate-400">Saldo Sekarang</p>
+                <p className="mt-2 text-2xl font-black text-slate-900">{formatCurrency(saldoSekarang)}</p>
               </div>
             </section>
 
@@ -147,23 +155,27 @@ export default function CashflowPage() {
                 </button>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[560px] text-left text-sm">
+                <table className="w-full min-w-[760px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                     <tr>
                       <th className="px-3 py-3">Produk</th>
                       <th className="px-3 py-3 text-right">Qty</th>
                       <th className="px-3 py-3 text-right">Pendapatan</th>
+                      <th className="px-3 py-3 text-right">Modal</th>
+                      <th className="px-3 py-3 text-right">Profit</th>
                       <th className="px-3 py-3">Sumber</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {data.items.length === 0 ? (
-                      <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400">Belum ada produk terjual.</td></tr>
+                      <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Belum ada produk terjual.</td></tr>
                     ) : data.items.map((item) => (
                       <tr key={item.name}>
                         <td className="px-3 py-3 font-bold text-slate-900">{item.name}</td>
                         <td className="px-3 py-3 text-right font-semibold">{item.quantity.toLocaleString('id-ID')}</td>
                         <td className="px-3 py-3 text-right font-semibold">{formatCurrency(item.revenue)}</td>
+                        <td className="px-3 py-3 text-right font-semibold text-amber-600">{formatCurrency(item.cost)}</td>
+                        <td className="px-3 py-3 text-right font-semibold text-indigo-600">{formatCurrency(item.profit)}</td>
                         <td className="px-3 py-3 text-xs font-bold uppercase text-slate-400">{item.source}</td>
                       </tr>
                     ))}

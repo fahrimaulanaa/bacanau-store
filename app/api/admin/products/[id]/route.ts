@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb, verifyAdminRequest } from '../../../../../lib/server/firebase-admin';
 import { supabaseAdmin } from '../../../../../lib/server/supabase-admin';
+import { getDefaultCostPrice } from '../../../../../lib/product-cost';
 
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_SIZE = 1_000_000;
@@ -63,16 +64,19 @@ export async function PATCH(
       const formData = await request.formData();
       const name = String(formData.get('name') || '').trim();
       const price = Number(String(formData.get('price') || '').replace(/[^0-9]/g, ''));
+      const rawCostPrice = String(formData.get('costPrice') || '').replace(/[^0-9]/g, '');
+      const costPrice = rawCostPrice ? Number(rawCostPrice) : getDefaultCostPrice(name);
       const category = String(formData.get('category') || 'Makanan').trim();
       const img = String(formData.get('img') || '');
       const uploadedUrl = name ? await uploadProductImage(formData, name, id) : null;
 
-      if (!name || !category || !Number.isFinite(price) || price <= 0 || (!img && !uploadedUrl)) {
+      if (!name || !category || !Number.isFinite(price) || price <= 0 || !Number.isFinite(costPrice) || costPrice < 0 || (!img && !uploadedUrl)) {
         return NextResponse.json({ message: 'Data produk tidak valid.' }, { status: 400 });
       }
 
       updateData.name = name;
       updateData.price = price;
+      updateData.costPrice = costPrice;
       updateData.category = category;
       updateData.img = uploadedUrl || img;
     } else {

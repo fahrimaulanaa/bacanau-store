@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb, verifyAdminRequest } from '../../../../lib/server/firebase-admin';
 import { supabaseAdmin } from '../../../../lib/server/supabase-admin';
+import { getDefaultCostPrice } from '../../../../lib/product-cost';
 
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_SIZE = 1_000_000;
@@ -54,9 +55,11 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const name = String(formData.get('name') || '').trim();
     const price = Number(String(formData.get('price') || '').replace(/[^0-9]/g, ''));
+    const rawCostPrice = String(formData.get('costPrice') || '').replace(/[^0-9]/g, '');
+    const costPrice = rawCostPrice ? Number(rawCostPrice) : getDefaultCostPrice(name);
     const category = String(formData.get('category') || 'Makanan').trim();
 
-    if (!name || !category || !Number.isFinite(price) || price <= 0) {
+    if (!name || !category || !Number.isFinite(price) || price <= 0 || !Number.isFinite(costPrice) || costPrice < 0) {
       return NextResponse.json({ message: 'Data produk tidak valid.' }, { status: 400 });
     }
 
@@ -68,6 +71,7 @@ export async function POST(request: Request) {
     await adminDb().collection('products').add({
       name,
       price,
+      costPrice,
       img,
       category,
       isActive: true,

@@ -4,11 +4,13 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import Link from 'next/link';
+import { resolveCostPrice } from '../lib/product-cost';
 
 interface Product {
   id: string;
   name: string;
   price: number;
+  costPrice?: number;
   img: string;
   category?: string;
   isActive?: boolean;
@@ -43,6 +45,7 @@ export default function Home() {
           id: doc.id,
           name: data.name || data.nama_produk || data.nama,
           price: Number(data.price || data.harga_produk || data.harga || 0),
+          costPrice: resolveCostPrice({ name: data.name || data.nama_produk || data.nama, costPrice: data.costPrice }),
           img: data.img || data.url_gambar || data.gambar,
           category: data.category || data.kategori || 'Makanan',
           isActive: data.isActive !== undefined ? data.isActive : true, 

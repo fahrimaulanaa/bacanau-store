@@ -11,6 +11,7 @@ interface CartItem {
     id: string;
     name: string;
     price: number;
+    costPrice?: number;
     quantity: number;
 }
 
@@ -50,10 +51,14 @@ export default function CheckoutPage() {
     const [isApplyingVoucher, setIsApplyingVoucher] = useState<boolean>(false);
 
     useEffect(() => {
-        setMounted(true);
-        const savedCart = localStorage.getItem('cart');
-        if (savedCart) setCart(JSON.parse(savedCart));
-        setUniqueCode(Math.floor(Math.random() * 10) + 1);
+        const hydrateCheckout = () => {
+            setMounted(true);
+            const savedCart = localStorage.getItem('cart');
+            if (savedCart) setCart(JSON.parse(savedCart));
+            setUniqueCode(Math.floor(Math.random() * 10) + 1);
+        };
+
+        hydrateCheckout();
     }, []);
 
     const baseTotal = cart.reduce((sum, item) => sum + (parsePrice(item.price) * (Number(item.quantity) || 1)), 0);
@@ -145,7 +150,7 @@ export default function CheckoutPage() {
             localStorage.removeItem('cart');
             toast.success("Pesanan berhasil dibuat!", { id: loadingToast });
             router.push(`/checkout/pay?id=${docRef.id}`);
-        } catch (error) {
+        } catch {
             toast.error("Gagal memproses pesanan.", { id: loadingToast });
             setIsSubmitting(false);
         }

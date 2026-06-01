@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 import { adminDb, serializeFirestoreValue } from '../../../lib/server/firebase-admin';
+import { getDefaultCostPrice, resolveCostPrice } from '../../../lib/product-cost';
 
 const DEFAULT_CASHFLOW_TOKEN = 'bacanau';
 const DEFAULT_ADMIN_CASHFLOW_TOKEN = 'fundrekaya';
@@ -9,6 +10,8 @@ type CashflowItem = {
   name: string;
   quantity: number;
   revenue: number;
+  cost: number;
+  profit: number;
   source: 'orders' | 'manual';
 };
 
@@ -16,7 +19,13 @@ type OrderDoc = {
   id: string;
   status?: string;
   totalPayment?: number;
-  items?: Array<{ name?: unknown; quantity?: unknown; price?: unknown }>;
+  items?: Array<{ id?: unknown; name?: unknown; quantity?: unknown; price?: unknown; costPrice?: unknown }>;
+};
+
+type ProductDoc = {
+  id: string;
+  name?: unknown;
+  costPrice?: unknown;
 };
 
 type ManualEntryDoc = {
@@ -24,6 +33,7 @@ type ManualEntryDoc = {
   productName?: string;
   quantity?: number;
   unitPrice?: number;
+  unitCost?: number;
   soldAt?: string;
   note?: string;
   createdAt?: unknown;
@@ -57,17 +67,37 @@ function getCreatedAtMillis(createdAt: unknown) {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function mergeItem(acc: Record<string, CashflowItem>, name: string, quantity: number, revenue: number, source: CashflowItem['source']) {
+function mergeItem(acc: Record<string, CashflowItem>, name: string, quantity: number, revenue: number, cost: number, source: CashflowItem['source']) {
   const cleanName = name.trim() || 'Produk tanpa nama';
   const key = cleanName.toLowerCase();
-  const existing = acc[key] || { name: cleanName, quantity: 0, revenue: 0, source };
+  const existing = acc[key] || { name: cleanName, quantity: 0, revenue: 0, cost: 0, profit: 0, source };
 
   acc[key] = {
     ...existing,
     quantity: existing.quantity + quantity,
     revenue: existing.revenue + revenue,
+    cost: existing.cost + cost,
+    profit: existing.profit + (revenue - cost),
     source: existing.source === source ? source : 'manual',
   };
+}
+
+function buildProductCostMaps(products: ProductDoc[]) {
+  return {
+    byId: new Map(products.map((product) => [product.id, resolveCostPrice(product)])),
+    byName: new Map(products.map((product) => [String(product.name || '').toLowerCase(), resolveCostPrice(product)])),
+  };
+}
+
+function resolveItemUnitCost(
+  item: { id?: unknown; name?: unknown; costPrice?: unknown },
+  productCosts: ReturnType<typeof buildProductCostMaps>,
+) {
+  const explicitCost = Number(item.costPrice);
+  if (Number.isFinite(explicitCost) && explicitCost >= 0) return explicitCost;
+  const productId = String(item.id || '');
+  const productName = String(item.name || '').toLowerCase();
+  return productCosts.byId.get(productId) ?? productCosts.byName.get(productName) ?? getDefaultCostPrice(item.name);
 }
 
 export async function GET(request: NextRequest) {
@@ -77,21 +107,25 @@ export async function GET(request: NextRequest) {
     }
 
     const db = adminDb();
-    const [ordersSnapshot, manualSnapshot] = await Promise.all([
+    const [ordersSnapshot, manualSnapshot, productsSnapshot] = await Promise.all([
       db.collection('orders').get(),
       db.collection('cashflowEntries').get(),
+      db.collection('products').get(),
     ]);
     const itemMap: Record<string, CashflowItem> = {};
 
     const orders = ordersSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as OrderDoc[];
+    const products = productsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as ProductDoc[];
+    const productCosts = buildProductCostMaps(products);
     const activeOrders = orders.filter((order) => order.status !== 'Dibatalkan');
     activeOrders.forEach((order) => {
       const items = Array.isArray(order.items) ? order.items : [];
-      items.forEach((item: { name?: unknown; quantity?: unknown; price?: unknown }) => {
+      items.forEach((item) => {
         const quantity = Number(item.quantity) || 0;
         const price = Number(item.price) || 0;
+        const cost = resolveItemUnitCost(item, productCosts);
         if (quantity <= 0 || price < 0) return;
-        mergeItem(itemMap, String(item.name || ''), quantity, price * quantity, 'orders');
+        mergeItem(itemMap, String(item.name || ''), quantity, price * quantity, cost * quantity, 'orders');
       });
     });
 
@@ -99,15 +133,38 @@ export async function GET(request: NextRequest) {
     manualEntries.forEach((entry) => {
       const quantity = Number(entry.quantity) || 0;
       const unitPrice = Number(entry.unitPrice) || 0;
+      const unitCost = Number.isFinite(Number(entry.unitCost)) ? Number(entry.unitCost) : getDefaultCostPrice(entry.productName);
       if (quantity <= 0 || unitPrice < 0) return;
-      mergeItem(itemMap, String(entry.productName || ''), quantity, quantity * unitPrice, 'manual');
+      mergeItem(itemMap, String(entry.productName || ''), quantity, quantity * unitPrice, quantity * unitCost, 'manual');
     });
 
+    const manualRevenue = manualEntries.reduce((sum, entry) => sum + ((Number(entry.quantity) || 0) * (Number(entry.unitPrice) || 0)), 0);
+    const manualCost = manualEntries.reduce((sum, entry) => {
+      const quantity = Number(entry.quantity) || 0;
+      const unitCost = Number.isFinite(Number(entry.unitCost)) ? Number(entry.unitCost) : getDefaultCostPrice(entry.productName);
+      return sum + (quantity * unitCost);
+    }, 0);
+    const activeOrderCost = activeOrders.reduce((sum, order) => {
+      const items = Array.isArray(order.items) ? order.items : [];
+      return sum + items.reduce((itemSum, item) => {
+        const quantity = Number(item.quantity) || 0;
+        return itemSum + (resolveItemUnitCost(item, productCosts) * quantity);
+      }, 0);
+    }, 0);
+    const completedOrders = activeOrders.filter((order) => order.status === 'Selesai (Lunas)');
+    const completedCost = completedOrders.reduce((sum, order) => {
+      const items = Array.isArray(order.items) ? order.items : [];
+      return sum + items.reduce((itemSum, item) => {
+        const quantity = Number(item.quantity) || 0;
+        return itemSum + (resolveItemUnitCost(item, productCosts) * quantity);
+      }, 0);
+    }, 0);
     const grossRevenue = activeOrders.reduce((sum, order) => sum + (Number(order.totalPayment) || 0), 0)
-      + manualEntries.reduce((sum, entry) => sum + ((Number(entry.quantity) || 0) * (Number(entry.unitPrice) || 0)), 0);
-    const completedRevenue = activeOrders
-      .filter((order) => order.status === 'Selesai (Lunas)')
+      + manualRevenue;
+    const completedRevenue = completedOrders
       .reduce((sum, order) => sum + (Number(order.totalPayment) || 0), 0);
+    const grossCost = activeOrderCost + manualCost;
+    const completedProfit = (completedRevenue - completedCost) + (manualRevenue - manualCost);
     const totalItemsSold = Object.values(itemMap).reduce((sum, item) => sum + item.quantity, 0);
 
     return NextResponse.json({
@@ -115,6 +172,13 @@ export async function GET(request: NextRequest) {
       summary: {
         grossRevenue,
         completedRevenue,
+        grossCost,
+        grossProfit: grossRevenue - grossCost,
+        completedCost,
+        completedProfit,
+        manualRevenue,
+        manualCost,
+        manualProfit: manualRevenue - manualCost,
         totalOrders: activeOrders.length,
         totalManualEntries: manualEntries.length,
         totalItemsSold,
@@ -140,9 +204,12 @@ export async function POST(request: NextRequest) {
     const productName = String(body.productName || '').trim();
     const quantity = Number(body.quantity);
     const unitPrice = Number(body.unitPrice);
+    const unitCost = body.unitCost === undefined || body.unitCost === ''
+      ? getDefaultCostPrice(productName)
+      : Number(body.unitCost);
     const soldAt = body.soldAt ? new Date(body.soldAt) : new Date();
 
-    if (!productName || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || Number.isNaN(soldAt.getTime())) {
+    if (!productName || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || !Number.isFinite(unitCost) || unitCost < 0 || Number.isNaN(soldAt.getTime())) {
       return NextResponse.json({ message: 'Data cashflow tidak valid.' }, { status: 400 });
     }
 
@@ -150,6 +217,7 @@ export async function POST(request: NextRequest) {
       productName,
       quantity,
       unitPrice,
+      unitCost,
       soldAt: soldAt.toISOString(),
       note: String(body.note || '').trim(),
       source: 'manual',
