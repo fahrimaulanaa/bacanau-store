@@ -231,15 +231,15 @@ function TrackContent() {
                 <h1 className="text-lg font-bold text-slate-800">Rincian Pesananmu</h1>
             </div>
 
-            <div className="max-w-md mx-auto pt-6 px-4">
+            <div className={`max-w-md mx-auto px-4 ${orderData ? 'pt-6' : 'min-h-[calc(100vh-7rem)] flex items-center justify-center'}`}>
                 {/* JIKA DATA BELUM ADA / FORM PENCARIAN */}
                 {!orderData ? (
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <div className="w-full bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                         <h2 className="font-bold text-slate-800 mb-4 text-center">Lacak Pesanan Bacanau</h2>
                         <form onSubmit={handleSearch} className="space-y-4">
                             <input 
                                 type="text" 
-                                placeholder="Masukkan ID Pesanan (Contoh: XyZ123...)" 
+                                placeholder="Masukkan ID pesanan atau nomor handphone yang digunakan" 
                                 className="w-full border border-slate-300 p-3.5 rounded-xl text-sm focus:ring-2 focus:ring-slate-900 outline-none"
                                 value={orderId}
                                 onChange={(e) => setOrderId(e.target.value)}
