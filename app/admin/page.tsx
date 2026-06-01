@@ -75,7 +75,7 @@ interface DatabaseStatus {
     scope: string;
 }
 
-const DASHBOARD_COLORS = ['#0f172a', '#ef4444', '#3b82f6', '#10b981', '#f59e0b'];
+const DASHBOARD_COLORS = ['#f97316', '#ec4899', '#8b5cf6', '#22c55e', '#06b6d4', '#facc15'];
 const DEFAULT_PRODUCT_CATEGORIES = ['Makanan', 'Merchandise'];
 const ADMIN_REFRESH_COOLDOWN_MS = 60_000;
 const ADMIN_CASHFLOW_TOKEN = 'fundrekaya';
@@ -1304,7 +1304,7 @@ Terima Kasih`;
 
                 {activeTab === 'dashboard' && (
                     <div className="space-y-6">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                             <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
                                 <p className="text-xs uppercase font-bold text-slate-400">Total Pesanan</p>
                                 <p className="text-3xl font-black text-slate-900 mt-3">{dashboardData.totalOrders}</p>
@@ -1316,11 +1316,6 @@ Terima Kasih`;
                                 <p className="text-sm text-slate-500 mt-2">Akumulasi total pembayaran dari semua pesanan.</p>
                             </div>
                             <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
-                                <p className="text-xs uppercase font-bold text-slate-400">Keuntungan Kotor</p>
-                                <p className="text-3xl font-black text-indigo-600 mt-3">{formatCurrency(dashboardData.grossProfit)}</p>
-                                <p className="text-sm text-slate-500 mt-2">Pendapatan dikurangi estimasi modal semua pesanan.</p>
-                            </div>
-                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
                                 <p className="text-xs uppercase font-bold text-slate-400">Keuntungan Bersih</p>
                                 <p className="text-3xl font-black text-slate-900 mt-3">{formatCurrency(dashboardData.netProfit)}</p>
                                 <p className="text-sm text-slate-500 mt-2">Profit dari pesanan yang sudah selesai lunas.</p>
@@ -1329,11 +1324,6 @@ Terima Kasih`;
                                 <p className="text-xs uppercase font-bold text-slate-400">Pesanan Perlu Dicek</p>
                                 <p className="text-3xl font-black text-amber-600 mt-3">{dashboardData.pendingOrders + dashboardData.reviewingOrders}</p>
                                 <p className="text-sm text-slate-500 mt-2">Antrian yang belum selesai diproses.</p>
-                            </div>
-                            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
-                                <p className="text-xs uppercase font-bold text-slate-400">Produk Aktif</p>
-                                <p className="text-3xl font-black text-slate-900 mt-3">{dashboardData.activeProducts}/{dashboardData.totalProducts}</p>
-                                <p className="text-sm text-slate-500 mt-2">Katalog aktif dan yang sedang disuspend.</p>
                             </div>
                         </div>
 
@@ -1381,11 +1371,17 @@ Terima Kasih`;
                                 <div className="h-[300px]">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <BarChart data={dashboardData.dailyCounts}>
+                                            <defs>
+                                                <linearGradient id="ordersGradient" x1="0" y1="0" x2="0" y2="1">
+                                                    <stop offset="0%" stopColor="#f43f5e" />
+                                                    <stop offset="100%" stopColor="#6366f1" />
+                                                </linearGradient>
+                                            </defs>
                                             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                                             <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 12 }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
                                             <YAxis allowDecimals={false} tick={{ fill: '#64748b', fontSize: 12 }} axisLine={{ stroke: '#cbd5e1' }} tickLine={false} />
-                                            <Tooltip cursor={{ fill: 'rgba(15, 23, 42, 0.04)' }} formatter={(value) => [String(value), 'Pesanan']} />
-                                            <Bar dataKey="count" radius={[10, 10, 0, 0]} fill="#0f172a" />
+                                            <Tooltip cursor={{ fill: 'rgba(99, 102, 241, 0.12)' }} formatter={(value) => [String(value), 'Pesanan']} />
+                                            <Bar dataKey="count" radius={[10, 10, 0, 0]} fill="url(#ordersGradient)" />
                                         </BarChart>
                                     </ResponsiveContainer>
                                 </div>
