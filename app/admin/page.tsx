@@ -635,8 +635,8 @@ Terima Kasih`;
     };
 
     const handleExportExcel = () => {
-        if (orders.length === 0 && products.length === 0) {
-            alert("Tidak ada data untuk diexport.");
+        if (orders.length === 0) {
+            alert("Tidak ada data pesanan untuk diexport.");
             return;
         }
 
@@ -644,89 +644,178 @@ Terima Kasih`;
         const exportStamp = exportDate.toISOString().slice(0, 19).replace(/[:T]/g, '-');
         const exportLabel = exportDate.toLocaleString('id-ID');
 
-        const ordersRows = orders.map((order) => {
+        const orderDates = orders
+            .map((order) => getCreatedAtDate(order.createdAt))
+            .filter((date): date is Date => Boolean(date))
+            .sort((a, b) => a.getTime() - b.getTime());
+
+        const periodLabel = orderDates.length > 0
+            ? `${orderDates[0].toLocaleDateString('id-ID')} - ${orderDates[orderDates.length - 1].toLocaleDateString('id-ID')}`
+            : '-';
+
+        const ordersRows = orders.map((order, index) => {
             const createdAt = getCreatedAtDate(order.createdAt);
             const items = order.items ?? [];
             const itemCount = items.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
+            const subtotal = Number(order.basePayment) > 0
+                ? Number(order.basePayment)
+                : items.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 0), 0);
+            const voucherAmount = Number(order.voucherAmount) || 0;
+            const uniqueCode = Number(order.uniqueCode) || 0;
 
-            return {
-                'Order ID': order.id,
-                'Nama Pelanggan': order.customerName,
-                'Kontak': order.contactInfo,
-                'Domisili': order.domicile,
-                'Status': order.status,
-                'Total Tagihan': Number(order.totalPayment) || 0,
-                'Jumlah Item': itemCount,
-                'Rincian Item': items.map((item) => `${item.name} (${item.quantity}x)`).join(', '),
-                'Bukti Transfer URL': order.paymentProofUrl || '',
-                'Tanggal Pesan': createdAt ? createdAt.toLocaleString('id-ID') : '',
-            };
+            return [
+                index + 1,
+                order.id,
+                createdAt ? createdAt.toLocaleString('id-ID') : '',
+                order.customerName,
+                order.contactInfo,
+                order.domicile,
+                order.status,
+                order.paymentMethod || 'QRIS',
+                subtotal,
+                order.voucherCode || '',
+                voucherAmount,
+                uniqueCode,
+                Number(order.totalPayment) || 0,
+                itemCount,
+                items.map((item) => `${item.name} (${item.quantity}x)`).join(', '),
+                order.paymentProofUrl || '',
+            ];
         });
 
         const orderItemsRows = orders.flatMap((order) => {
             const createdAt = getCreatedAtDate(order.createdAt);
-            return (order.items ?? []).map((item) => {
+            return (order.items ?? []).map((item, index) => {
                 const quantity = Number(item.quantity) || 0;
                 const price = Number(item.price) || 0;
 
-                return {
-                    'Order ID': order.id,
-                    'Nama Pelanggan': order.customerName,
-                    'Status': order.status,
-                    'Tanggal Pesan': createdAt ? createdAt.toLocaleString('id-ID') : '',
-                    'Nama Item': item.name,
-                    'Qty': quantity,
-                    'Harga Satuan': price,
-                    'Subtotal': quantity * price,
-                };
+                return [
+                    index + 1,
+                    order.id,
+                    createdAt ? createdAt.toLocaleString('id-ID') : '',
+                    order.customerName,
+                    order.status,
+                    item.name,
+                    quantity,
+                    price,
+                    quantity * price,
+                ];
             });
         });
 
-        const productRows = products.map((product) => ({
-            'Product ID': product.id,
-            'Nama Produk': product.name,
-            'Kategori': product.category || 'Makanan',
-            'Harga': product.price,
-            'Harga Modal': resolveCostPrice(product),
-            'Estimasi Profit per Item': product.price - resolveCostPrice(product),
-            'Status Produk': (product.isActive ?? true) ? 'Aktif' : 'Suspend',
-            'URL Gambar': product.img,
-        }));
+        const totalSubtotal = ordersRows.reduce((sum, row) => sum + (Number(row[8]) || 0), 0);
+        const totalVoucher = ordersRows.reduce((sum, row) => sum + (Number(row[10]) || 0), 0);
+        const totalUniqueCode = ordersRows.reduce((sum, row) => sum + (Number(row[11]) || 0), 0);
+        const totalPayment = ordersRows.reduce((sum, row) => sum + (Number(row[12]) || 0), 0);
+        const totalItems = ordersRows.reduce((sum, row) => sum + (Number(row[13]) || 0), 0);
 
-        const summaryRows = [
-            { Label: 'Generated At', Value: exportLabel },
-            { Label: 'Total Pesanan', Value: dashboardData.totalOrders },
-            { Label: 'Total Produk', Value: dashboardData.totalProducts },
-            { Label: 'Produk Aktif', Value: dashboardData.activeProducts },
-            { Label: 'Produk Disuspend', Value: dashboardData.suspendedProducts },
-            { Label: 'Pesanan Menunggu Pembayaran', Value: dashboardData.pendingOrders },
-            { Label: 'Pesanan Mengecek Bukti', Value: dashboardData.reviewingOrders },
-            { Label: 'Pesanan Selesai', Value: dashboardData.completedOrders },
-            { Label: 'Pesanan Dibatalkan', Value: dashboardData.canceledOrders },
-            { Label: 'Pendapatan Kotor', Value: dashboardData.grossRevenue },
-            { Label: 'Pendapatan Selesai', Value: dashboardData.completedRevenue },
-            { Label: 'Modal Kotor', Value: dashboardData.grossCost },
-            { Label: 'Modal Selesai', Value: dashboardData.completedCost },
-            { Label: 'Keuntungan Kotor', Value: dashboardData.grossProfit },
-            { Label: 'Keuntungan Bersih', Value: dashboardData.netProfit },
-            { Label: 'Rata-rata Transaksi', Value: dashboardData.averageOrderValue },
+        const summarySheetData = [
+            ['LAPORAN PESANAN BACANAU STORE'],
+            ['Tanggal Export', exportLabel],
+            ['Periode Data', periodLabel],
+            [],
+            ['Highlight Pesanan'],
+            ['Total Pesanan', dashboardData.totalOrders],
+            ['Pesanan Selesai', dashboardData.completedOrders],
+            ['Pesanan Menunggu Pembayaran', dashboardData.pendingOrders],
+            ['Pesanan Mengecek Bukti', dashboardData.reviewingOrders],
+            ['Pesanan Dibatalkan', dashboardData.canceledOrders],
+            [],
+            ['Ringkasan Keuangan'],
+            ['Pendapatan Kotor', dashboardData.grossRevenue],
+            ['Pendapatan Selesai', dashboardData.completedRevenue],
+            ['Rata-rata Transaksi', dashboardData.averageOrderValue],
+            ['Keuntungan Kotor', dashboardData.grossProfit],
+            ['Keuntungan Bersih', dashboardData.netProfit],
+            [],
+            ['Catatan', 'Semua nominal dalam Rupiah. Voucher dihitung per pesanan.'],
         ];
 
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'Ringkasan');
-        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(ordersRows), 'Pesanan');
-        XLSX.utils.book_append_sheet(
-            workbook,
-            XLSX.utils.json_to_sheet(orderItemsRows.length ? orderItemsRows : [{ Catatan: 'Tidak ada item pesanan.' }]),
-            'Detail Item'
-        );
-        XLSX.utils.book_append_sheet(
-            workbook,
-            XLSX.utils.json_to_sheet(productRows.length ? productRows : [{ Catatan: 'Tidak ada produk.' }]),
-            'Produk'
-        );
+        const summarySheet = XLSX.utils.aoa_to_sheet(summarySheetData);
+        summarySheet['!cols'] = [{ wch: 28 }, { wch: 48 }];
+        summarySheet['!merges'] = [
+            { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
+            { s: { r: 4, c: 0 }, e: { r: 4, c: 1 } },
+            { s: { r: 11, c: 0 }, e: { r: 11, c: 1 } },
+        ];
 
-        XLSX.writeFile(workbook, `bacanau-admin-export-${exportStamp}.xlsx`);
+        const ordersHeader = [
+            'No',
+            'Order ID',
+            'Tanggal Pesan',
+            'Nama Pelanggan',
+            'Kontak',
+            'Domisili',
+            'Status',
+            'Metode Pembayaran',
+            'Subtotal',
+            'Kode Voucher',
+            'Potongan Voucher',
+            'Kode Unik',
+            'Total Tagihan',
+            'Jumlah Item',
+            'Rincian Item',
+            'Bukti Transfer URL',
+        ];
+        const ordersSheet = XLSX.utils.aoa_to_sheet([
+            ordersHeader,
+            ...ordersRows,
+            ['TOTAL', '', '', '', '', '', '', '', totalSubtotal, '', totalVoucher, totalUniqueCode, totalPayment, totalItems, '', ''],
+        ]);
+        ordersSheet['!cols'] = [
+            { wch: 6 },
+            { wch: 24 },
+            { wch: 22 },
+            { wch: 22 },
+            { wch: 16 },
+            { wch: 16 },
+            { wch: 20 },
+            { wch: 18 },
+            { wch: 14 },
+            { wch: 14 },
+            { wch: 16 },
+            { wch: 12 },
+            { wch: 16 },
+            { wch: 12 },
+            { wch: 40 },
+            { wch: 30 },
+        ];
+        ordersSheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: ordersRows.length, c: ordersHeader.length - 1 } }) };
+
+        const orderItemsHeader = [
+            'No',
+            'Order ID',
+            'Tanggal Pesan',
+            'Nama Pelanggan',
+            'Status',
+            'Nama Item',
+            'Qty',
+            'Harga Satuan',
+            'Subtotal',
+        ];
+        const orderItemsSheet = XLSX.utils.aoa_to_sheet([
+            orderItemsHeader,
+            ...(orderItemsRows.length ? orderItemsRows : [['-', '-', '-', '-', '-', 'Tidak ada item pesanan', '-', '-', '-']]),
+        ]);
+        orderItemsSheet['!cols'] = [
+            { wch: 6 },
+            { wch: 24 },
+            { wch: 22 },
+            { wch: 22 },
+            { wch: 20 },
+            { wch: 28 },
+            { wch: 8 },
+            { wch: 14 },
+            { wch: 14 },
+        ];
+        orderItemsSheet['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: orderItemsRows.length, c: orderItemsHeader.length - 1 } }) };
+
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, summarySheet, 'Ringkasan Pesanan');
+        XLSX.utils.book_append_sheet(workbook, ordersSheet, 'Daftar Pesanan');
+        XLSX.utils.book_append_sheet(workbook, orderItemsSheet, 'Detail Item');
+
+        XLSX.writeFile(workbook, `bacanau-pesanan-${exportStamp}.xlsx`);
     };
 
     const handleExportPdf = () => {
@@ -1029,8 +1118,8 @@ Terima Kasih`;
         : liveStatus === 'error'
             ? 'bg-red-500'
             : 'bg-amber-500';
-    const canExport = orders.length > 0 || products.length > 0;
     const canExportOrders = orders.length > 0;
+    const canExport = canExportOrders;
 
     if (authLoading) return <div className="min-h-screen bg-slate-900 flex justify-center items-center text-white"><p className="animate-pulse">Memverifikasi Admin...</p></div>;
 
@@ -1081,7 +1170,7 @@ Terima Kasih`;
                                     fill="currentColor"
                                 />
                             </svg>
-                            Export to Excel
+                            Export Pesanan (Excel)
                         </button>
                         <button
                             type="button"
@@ -1101,7 +1190,7 @@ Terima Kasih`;
                                     fill="currentColor"
                                 />
                             </svg>
-                            Export to PDF
+                            Export Pesanan (PDF)
                         </button>
                         <span className="text-xs text-slate-500 font-medium hidden md:inline">Logged as: {user.email}</span>
                         
@@ -1178,10 +1267,10 @@ Terima Kasih`;
                                 Refresh Data
                             </button>
                             <button type="button" onClick={() => { handleExportExcel(); setIsAdminMenuOpen(false); }} disabled={!canExport} className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs font-bold text-emerald-700 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">
-                                Export Excel
+                                Export Pesanan
                             </button>
                             <button type="button" onClick={() => { handleExportPdf(); setIsAdminMenuOpen(false); }} disabled={!canExportOrders} className="rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-xs font-bold text-red-600 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">
-                                Export PDF
+                                Export Pesanan (PDF)
                             </button>
                             <Link href="/" onClick={() => setIsAdminMenuOpen(false)} className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-center text-xs font-bold text-slate-700">
                                 Home
