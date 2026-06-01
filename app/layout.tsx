@@ -4,18 +4,17 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://bacanaustore.netlify.app'),
-  title: 'Bacanau Store | Platform Apparel & Digital Art Kampus',
+  title: 'Bacanau Store | Bantu Kami LPT',
   description: 'Official e-commerce Bacanau Store. Beli apapun yang kami jual hehe',
-  keywords: ['Bacanau Store', 'BaCaNau', 'Nautika ITB', 'Streetwear Bandung', 'Digital Art Bacanau'],
-  authors: [{ name: 'Fahri Maulana' }],
+  keywords: ['Bacanau Store', 'BaCaNau', 'Nautika ITB', ],
+  authors: [{ name: 'Fahri Maulana Al Ghazali and Team' }],
   verification: {
     google: 'f8ik7ltUc0EBBLqJq-BuharKN-Xu7zBSpS3tO8PbjWI', 
-    // Contoh dari gambarmu: 'ezN9lZ75WnD74od1ix3Rww8IsPREpnzT98z7J...'
   },
   openGraph: {
-    title: 'Bacanau Store | Apparel & Digital Art',
-    description: 'Official e-commerce Bacanau Store. Beli merchandise eksklusif dengan mudah.',
-    url: 'https://bacanaustore.netlify.app', // Ganti dengan domain aslimu nanti
+    title: 'Bacanau Store | Bantu Kami LPT',
+    description: 'Beli merchandise kami dong. Support UMKM lokal hehe.',
+    url: 'https://bacanaustore.netlify.app', 
     siteName: 'Bacanau Store',
     images: [
       {
