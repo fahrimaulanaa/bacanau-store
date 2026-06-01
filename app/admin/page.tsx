@@ -8,6 +8,7 @@ import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { canManageCatalog } from '../../lib/admin-access';
 import { getDefaultCostPrice, resolveCostPrice } from '../../lib/product-cost';
 import {
     Bar,
@@ -79,6 +80,7 @@ const DASHBOARD_COLORS = ['#f97316', '#ec4899', '#8b5cf6', '#22c55e', '#06b6d4',
 const DEFAULT_PRODUCT_CATEGORIES = ['Makanan', 'Merchandise'];
 const ADMIN_REFRESH_COOLDOWN_MS = 60_000;
 const ADMIN_CASHFLOW_TOKEN = 'fundrekaya';
+type AdminTab = 'dashboard' | 'orders' | 'products' | 'vouchers' | 'finance';
 
 function formatCurrency(value: number) {
     return `Rp ${value.toLocaleString('id-ID')}`;
@@ -125,7 +127,7 @@ export default function AdminPage() {
     const [loginError, setLoginError] = useState<string>('');
 
     // Dashboard States
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products' | 'vouchers' | 'finance'>('dashboard');
+    const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
     const [isAdminMenuOpen, setIsAdminMenuOpen] = useState<boolean>(false);
     const [orders, setOrders] = useState<Order[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
@@ -279,6 +281,7 @@ export default function AdminPage() {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
             if (!currentUser) {
+                setActiveTab('dashboard');
                 setOrders([]);
                 setProducts([]);
                 setVouchers([]);
@@ -288,6 +291,10 @@ export default function AdminPage() {
                 setHasVouchersSnapshot(false);
                 setLiveError(false);
             } else {
+                if (!canManageCatalog(currentUser.email)) {
+                    setActiveTab('dashboard');
+                    setIsAdminMenuOpen(false);
+                }
                 setHasOrdersSnapshot(false);
                 setHasProductsSnapshot(false);
                 setHasVouchersSnapshot(false);
@@ -333,6 +340,8 @@ export default function AdminPage() {
     };
 
     const handleLogout = () => {
+        setActiveTab('dashboard');
+        setIsAdminMenuOpen(false);
         signOut(auth);
     };
 
@@ -629,7 +638,13 @@ Terima Kasih`;
         }
     };
 
-    const handleSelectAdminTab = (tab: 'dashboard' | 'orders' | 'products' | 'vouchers' | 'finance') => {
+    const handleSelectAdminTab = (tab: AdminTab) => {
+        if (!canManageCatalog(user?.email) && !['dashboard', 'orders'].includes(tab)) {
+            setActiveTab('dashboard');
+            setIsAdminMenuOpen(false);
+            return;
+        }
+
         setActiveTab(tab);
         setIsAdminMenuOpen(false);
     };
@@ -1120,6 +1135,7 @@ Terima Kasih`;
             : 'bg-amber-500';
     const canExportOrders = orders.length > 0;
     const canExport = canExportOrders;
+    const canManageCatalogAndVouchers = canManageCatalog(user?.email);
 
     if (authLoading) return <div className="min-h-screen bg-slate-900 flex justify-center items-center text-white"><p className="animate-pulse">Memverifikasi Admin...</p></div>;
 
@@ -1252,15 +1268,19 @@ Terima Kasih`;
                             <button onClick={() => handleSelectAdminTab('orders')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'orders' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
                                 Verifikasi Pesanan ({orders.length})
                             </button>
-                            <button onClick={() => handleSelectAdminTab('products')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'products' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
-                                Kelola Katalog Produk ({products.length})
-                            </button>
-                            <button onClick={() => handleSelectAdminTab('vouchers')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'vouchers' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
-                                Kelola Voucher ({vouchers.length})
-                            </button>
-                            <button onClick={() => handleSelectAdminTab('finance')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'finance' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
-                                Tools Keuangan
-                            </button>
+                            {canManageCatalogAndVouchers && (
+                                <>
+                                    <button onClick={() => handleSelectAdminTab('products')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'products' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                                        Kelola Katalog Produk ({products.length})
+                                    </button>
+                                    <button onClick={() => handleSelectAdminTab('vouchers')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'vouchers' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                                        Kelola Voucher ({vouchers.length})
+                                    </button>
+                                    <button onClick={() => handleSelectAdminTab('finance')} className={`text-left rounded-xl px-4 py-3 text-sm font-bold ${activeTab === 'finance' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                                        Tools Keuangan
+                                    </button>
+                                </>
+                            )}
                         </div>
                         <div className="mt-4 grid grid-cols-2 gap-2">
                             <button type="button" onClick={() => { void fetchAdminData({ silent: true }); setIsAdminMenuOpen(false); }} disabled={refreshingAdminData} className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-3 text-xs font-bold text-slate-700 disabled:text-slate-400">
@@ -1291,6 +1311,8 @@ Terima Kasih`;
                     <button onClick={() => handleSelectAdminTab('orders')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'orders' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         📦 Verifikasi Pesanan ({orders.length})
                     </button>
+                    {canManageCatalogAndVouchers && (
+                        <>
                     <button onClick={() => handleSelectAdminTab('products')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'products' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         👕 Kelola Katalog Produk ({products.length})
                     </button>
@@ -1300,6 +1322,8 @@ Terima Kasih`;
                     <button onClick={() => handleSelectAdminTab('finance')} className={`py-2.5 px-4 font-bold text-sm border-b-2 transition-all ${activeTab === 'finance' ? 'border-slate-900 text-slate-900' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
                         💰 Tools Keuangan
                     </button>
+                        </>
+                    )}
                 </div>
 
                 {activeTab === 'dashboard' && (
@@ -1606,7 +1630,7 @@ Terima Kasih`;
                 )}
 
                 {/* TAB 2: KELOLA KATALOG PRODUK */}
-                {activeTab === 'products' && (
+                {activeTab === 'products' && canManageCatalogAndVouchers && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
                             <h2 className="text-lg font-bold text-slate-900 mb-4">{editingProductId ? "📝 Edit Data Produk" : "✨ Tambah Produk Baru"}</h2>
@@ -1737,7 +1761,7 @@ Terima Kasih`;
                 )}
 
                 {/* TAB 3: KELOLA VOUCHER */}
-                {activeTab === 'vouchers' && (
+                {activeTab === 'vouchers' && canManageCatalogAndVouchers && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm h-fit">
                             <h2 className="text-lg font-bold text-slate-900 mb-4">{editingVoucherId ? "📝 Edit Voucher" : "🎟️ Tambah Voucher Baru"}</h2>
@@ -1871,7 +1895,7 @@ Terima Kasih`;
                 )}
 
                 {/* TAB 4: TOOLS KEUANGAN */}
-                {activeTab === 'finance' && (
+                {activeTab === 'finance' && canManageCatalogAndVouchers && (
                     <div className="grid grid-cols-1 gap-6">
                         <form onSubmit={handleSaveCashflowEntry} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm max-w-2xl">
                             <h2 className="text-lg font-bold text-slate-900 mb-4">Input Penjualan Lama</h2>

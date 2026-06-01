@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
+import { canManageCatalog } from '../../../../lib/admin-access';
 import { adminDb, verifyAdminRequest } from '../../../../lib/server/firebase-admin';
 import { supabaseAdmin } from '../../../../lib/server/supabase-admin';
 import { getDefaultCostPrice } from '../../../../lib/product-cost';
@@ -50,6 +51,9 @@ export async function POST(request: Request) {
     const admin = await verifyAdminRequest(request);
     if (!admin) {
       return NextResponse.json({ message: 'Tidak terotorisasi.' }, { status: 401 });
+    }
+    if (!canManageCatalog(admin.email)) {
+      return NextResponse.json({ message: 'Akses kelola katalog hanya untuk admin utama.' }, { status: 403 });
     }
 
     const formData = await request.formData();

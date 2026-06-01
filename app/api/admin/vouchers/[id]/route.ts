@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
+import { canManageCatalog } from '../../../../../lib/admin-access';
 import { adminDb, verifyAdminRequest } from '../../../../../lib/server/firebase-admin';
 
 const VOUCHER_CODE_PATTERN = /^[A-Z0-9-]{3,30}$/;
@@ -12,6 +13,9 @@ export async function PATCH(
     const admin = await verifyAdminRequest(request);
     if (!admin) {
       return NextResponse.json({ message: 'Tidak terotorisasi.' }, { status: 401 });
+    }
+    if (!canManageCatalog(admin.email)) {
+      return NextResponse.json({ message: 'Akses kelola voucher hanya untuk admin utama.' }, { status: 403 });
     }
 
     const { id } = await context.params;
@@ -73,6 +77,9 @@ export async function DELETE(
     const admin = await verifyAdminRequest(request);
     if (!admin) {
       return NextResponse.json({ message: 'Tidak terotorisasi.' }, { status: 401 });
+    }
+    if (!canManageCatalog(admin.email)) {
+      return NextResponse.json({ message: 'Akses kelola voucher hanya untuk admin utama.' }, { status: 403 });
     }
 
     const { id } = await context.params;

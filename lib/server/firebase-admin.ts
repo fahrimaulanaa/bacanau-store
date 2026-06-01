@@ -3,6 +3,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { getConfiguredAdminEmails, normalizeAdminEmail } from '../admin-access';
 
 type ServiceAccountConfig = {
   project_id: string;
@@ -71,16 +72,17 @@ export async function verifyAdminRequest(request: Request) {
 
   const decodedToken = await adminAuth().verifyIdToken(token, true);
   const adminAllowlist = process.env.ADMIN_EMAILS || process.env.ADMIN_EMAIL || '';
-  const allowedEmails = adminAllowlist
+  const configuredEmails = adminAllowlist
     .split(',')
-    .map((email) => email.trim().toLowerCase())
+    .map((email) => normalizeAdminEmail(email))
     .filter(Boolean);
+  const allowedEmails = getConfiguredAdminEmails(adminAllowlist);
 
-  if (allowedEmails.length === 0) {
+  if (configuredEmails.length === 0) {
     return decodedToken;
   }
 
-  const email = decodedToken.email?.toLowerCase();
+  const email = normalizeAdminEmail(decodedToken.email);
   if (!email || !allowedEmails.includes(email)) {
     return null;
   }
