@@ -33,7 +33,7 @@ export default function Home() {
   });
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
   const [cartBump, setCartBump] = useState<boolean>(false);
-  const [showPreorderNotification, setShowPreorderNotification] = useState<boolean>(true);
+  const showPreorderNotification = true;
 
   // 1. REAL-TIME LISTENER: Ambil produk dari Firestore secara Live
   useEffect(() => {
@@ -120,38 +120,28 @@ export default function Home() {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/20 bg-white shadow-2xl">
             <div className="p-6 sm:p-8">
-              <div className="mb-5 flex items-start justify-between gap-4">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+              <div className="mb-5 flex justify-center">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
                   <span className="text-2xl font-black">!</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowPreorderNotification(false)}
-                  aria-label="Tutup notifikasi pre-order"
-                  className="rounded-full px-2 py-1 text-3xl leading-none text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900"
-                >
-                  &times;
-                </button>
               </div>
 
-              <p className="text-center text-sm font-black uppercase tracking-wide text-amber-600">Info Pre-order</p>
+              <p className="text-center text-sm font-black uppercase tracking-wide text-amber-600">Info Pesanan</p>
               <h2 className="mt-2 text-center text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
-                Pre-order Bacanau Store
+                Pesanan Sedang Diproses
               </h2>
               <p className="mt-4 text-center text-base leading-7 text-slate-600">
-                Pre-order dibuka mulai tanggal <strong>29 Mei</strong> hingga <strong>02 Juni 2026</strong>. Pengiriman pesanan
-                ke vendor dimulai <strong>2 Juni 2026 pukul 13:00 WIB</strong>.
-                Pengambilan atau pengiriman diperkirakan pada tanggal <strong>4 - 5 Juni 2026</strong>.
+                Pesanan anda saat ini sudah diproses oleh Vendor, diperkirakan dapat diambil sekitar
+                <strong> 4 - 5 Juni 2026</strong>.
               </p>
             </div>
             <div className="border-t border-slate-100 p-6 sm:p-8">
-              <button
-                type="button"
-                onClick={() => setShowPreorderNotification(false)}
-                className="w-full rounded-xl bg-amber-500 px-4 py-3 text-sm font-black uppercase tracking-wide text-white transition-colors hover:bg-amber-600"
+              <Link
+                href="/track"
+                className="block w-full rounded-xl bg-amber-500 px-4 py-3 text-center text-sm font-black uppercase tracking-wide text-white transition-colors hover:bg-amber-600"
               >
-                Mengerti
-              </button>
+                Lacak Pesanan
+              </Link>
             </div>
           </div>
         </div>
